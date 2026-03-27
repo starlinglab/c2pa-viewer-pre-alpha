@@ -222,9 +222,16 @@
         }
         
         .loading {
+            min-height: calc(100vh - 180px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
             text-align: center;
-            padding: 20px;
-            color: #667eea;
+            padding: 40px 20px;
+            color: #2e3c5a;
+            font-size: 28px;
+            font-weight: 600;
+            line-height: 1.25;
         }
         
         .error {
@@ -521,7 +528,11 @@
         }
         
         .details-section-title {
-            font-weight: bold;
+            font-weight: 700;
+            font-size: 12px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #6f6f6f;
             margin-bottom: 10px;
         }
         
@@ -540,6 +551,18 @@
         
         .detail-text {
             font-size: 14px;
+        }
+
+        .identity-primary {
+            display: block;
+        }
+
+        .identity-secondary {
+            display: block;
+            margin-top: 2px;
+            font-size: 12px;
+            color: #7a7a7a;
+            line-height: 1.35;
         }
 
         .action-list {
@@ -582,6 +605,103 @@
             color: #6d6d6d;
             font-size: 12px;
             line-height: 1.35;
+        }
+
+        .integrity-section {
+            display: none;
+        }
+
+        .integrity-separator {
+            border: 0;
+            border-top: 1px solid #e3e3e3;
+            margin: 22px 0 18px;
+        }
+
+        .integrity-separator.bottom {
+            margin: 18px 0 0;
+        }
+
+        .integrity-block {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .integrity-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .integrity-label {
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+            color: #8a8a8a;
+            text-transform: uppercase;
+        }
+
+        .integrity-value a {
+            color: #4b50ff;
+            text-decoration: underline;
+            overflow-wrap: anywhere;
+            line-height: 1.35;
+        }
+
+        .integrity-toggle {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 0;
+            border: 0;
+            background: transparent;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .integrity-toggle-main {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
+        }
+
+        .integrity-toggle-icon {
+            font-size: 20px;
+            line-height: 1;
+        }
+
+        .integrity-toggle-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #222;
+        }
+
+        .integrity-toggle-hint {
+            color: #7a7a7a;
+            font-size: 12px;
+        }
+
+        .integrity-toggle-state {
+            color: #6d6d6d;
+            font-size: 22px;
+            font-weight: 700;
+            transition: transform 0.2s ease;
+        }
+
+        .integrity-toggle[aria-expanded="true"] .integrity-toggle-state {
+            transform: rotate(90deg);
+        }
+
+        .integrity-collapsible {
+            display: none;
+            padding-top: 14px;
+        }
+
+        .integrity-collapsible.open {
+            display: block;
         }
         
         .detail-thumbnail {
@@ -833,11 +953,25 @@
                                 <div class="detail-icon">👤</div>
                                 <div class="detail-text" id="produced-by">Loading...</div>
                             </div>
+                            <div class="detail-item">
+                                <div class="detail-icon">🗓️</div>
+                                <div class="detail-text">Produced on<br><span id="produced-on">Not available</span></div>
+                            </div>
                         </div>
                         
                         <div class="details-section">
-                            <div class="details-section-title">Process</div>
-                            <div class="details-subheader">The software used to create this content:</div>
+                            <div class="detail-item">
+                                <img src="" alt="Thumbnail" class="detail-thumbnail" id="ingredient-thumbnail">
+                                <div class="detail-text">Original Image<br>© Legacy CAI Format</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-icon">📍</div>
+                                <div class="detail-text">Location<br><span id="location-data">Not available</span></div>
+                            </div>
+                        </div>
+                        
+                        <div class="details-section">
+                            <div class="details-section-title">Produced with</div>
                             
                             <div class="detail-item">
                                 <div class="detail-icon">🛠️</div>
@@ -849,13 +983,24 @@
                                 <div class="detail-text" id="edits-activity">Loading...</div>
                             </div>
                         </div>
-                        
-                        <div class="details-section">
-                            <div class="details-section-title">Legacy CAI Data</div>
-                            <div class="detail-item">
-                                <img src="" alt="Thumbnail" class="detail-thumbnail" id="ingredient-thumbnail">
-                                <div class="detail-text">Original Image<br>© Legacy CAI Format</div>
+
+                        <div class="details-section integrity-section" id="starling-integrity-section">
+                            <hr class="integrity-separator" id="starling-integrity-top-separator">
+                            <div class="details-section-title">Starling Integrity</div>
+                            <button class="integrity-toggle" id="starling-storage-toggle" type="button" aria-expanded="false" onclick="toggleIntegrityStorage()">
+                                <span class="integrity-toggle-main">
+                                    <span class="integrity-toggle-icon">🗂️</span>
+                                    <span>
+                                        <span class="integrity-toggle-label">Storage</span><br>
+                                        <span class="integrity-toggle-hint">Click to expand</span>
+                                    </span>
+                                </span>
+                                <span class="integrity-toggle-state">›</span>
+                            </button>
+                            <div class="integrity-collapsible" id="starling-storage-panel">
+                                <div class="integrity-block" id="starling-integrity-content"></div>
                             </div>
+                            <hr class="integrity-separator bottom" id="starling-integrity-bottom-separator">
                         </div>
                         
                         <div class="details-section">
@@ -972,6 +1117,11 @@
         
         // If source URL is provided, load the image automatically
         if (sourceUrl) {
+            uploadView.style.display = 'none';
+            resultsView.style.display = 'block';
+            mainLayout.style.display = 'none';
+            fileHeader.style.display = 'none';
+            showMessage('Preparing remote image…', 'loading');
             try {
                 const url = sourceUrl.startsWith('http://') || sourceUrl.startsWith('https://') 
                     ? sourceUrl 
@@ -1014,13 +1164,18 @@
         async function loadImageFromUrl(url) {
             try {
                 console.log('Loading image from URL:', url);
-                showMessage('Loading image from URL...', 'loading');
+                uploadView.style.display = 'none';
+                resultsView.style.display = 'block';
+                mainLayout.style.display = 'none';
+                fileHeader.style.display = 'none';
+                showMessage('Downloading image from source…', 'loading');
                 
                 const response = await fetch(url);
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 
+                showMessage('Parsing CAI data…', 'loading');
                 const blob = await response.blob();
                 if (!blob.type.startsWith('image/')) {
                     console.warn('Response is not an image, type:', blob.type);
@@ -1230,11 +1385,17 @@
         // Display content record in the format shown
         function displayContentRecord(metadata) {
             const contentRecord = metadata.contentRecord || {};
+            const signerIdentity = getSignerIdentity(metadata);
             
             // Produced by (using producer data)
             const producedBy = document.getElementById('produced-by');
             if (producedBy) {
                 producedBy.textContent = contentRecord.producer || 'Not specified';
+            }
+
+            const producedOn = document.getElementById('produced-on');
+            if (producedOn) {
+                producedOn.textContent = getProducedOn(metadata) || 'Not available';
             }
             
             // Produced with
@@ -1247,10 +1408,17 @@
             const editsActivity = document.getElementById('edits-activity');
             if (editsActivity) {
                 const actionEntries = metadata.detailedAssertions?.actions;
+                const hasStoreRecorder = metadata.caiClaims?.recorder && /starling store/i.test(metadata.caiClaims.recorder);
                 if (Array.isArray(actionEntries) && actionEntries.length > 0) {
-                    editsActivity.innerHTML = `<div class="action-list">${actionEntries.map(formatActionSummary).join('')}</div>`;
+                    const renderedActions = actionEntries.map(formatActionSummary);
+                    if (hasStoreRecorder) {
+                        renderedActions.push(formatStoreSummary(metadata.caiClaims.recorder));
+                    }
+                    editsActivity.innerHTML = `<div class="action-list">${renderedActions.join('')}</div>`;
                 } else if (contentRecord.editsAndActivity && contentRecord.editsAndActivity.length > 0) {
-                    editsActivity.innerHTML = `<div class="action-list">${contentRecord.editsAndActivity.map(action => `
+                    editsActivity.innerHTML = `<div class="action-list">${contentRecord.editsAndActivity.map(action => action === 'Store'
+                        ? formatStoreSummary(metadata.caiClaims?.recorder)
+                        : `
                         <div class="action-entry">
                             <div class="action-marker"></div>
                             <div class="action-body">
@@ -1264,15 +1432,51 @@
             }
             
             // Identified by
+            const locationData = document.getElementById('location-data');
+            if (locationData) {
+                locationData.textContent = getDisplayLocation(metadata) || 'Not available';
+            }
+
+            const integritySection = document.getElementById('starling-integrity-section');
+            const integrityContent = document.getElementById('starling-integrity-content');
+            const integrityTopSeparator = document.getElementById('starling-integrity-top-separator');
+            const integrityBottomSeparator = document.getElementById('starling-integrity-bottom-separator');
+            if (integritySection && integrityContent) {
+                const integrityData = getStarlingIntegrityData(metadata);
+                if (integrityData.length > 0) {
+                    integritySection.style.display = 'block';
+                    integrityContent.innerHTML = integrityData.map(item => `
+                        <div class="integrity-item">
+                            <div class="integrity-label">${escapeHtml(item.label)}</div>
+                            <div class="integrity-value"><a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.value)}</a></div>
+                        </div>
+                    `).join('');
+                    const storagePanel = document.getElementById('starling-storage-panel');
+                    const storageToggle = document.getElementById('starling-storage-toggle');
+                    if (storagePanel && storageToggle) {
+                        storagePanel.classList.remove('open');
+                        storageToggle.setAttribute('aria-expanded', 'false');
+                    }
+                    if (integrityTopSeparator) integrityTopSeparator.style.display = 'block';
+                    if (integrityBottomSeparator) integrityBottomSeparator.style.display = 'block';
+                } else {
+                    integritySection.style.display = 'none';
+                    integrityContent.innerHTML = '';
+                    if (integrityTopSeparator) integrityTopSeparator.style.display = 'none';
+                    if (integrityBottomSeparator) integrityBottomSeparator.style.display = 'none';
+                }
+            }
+
+            // Identified by
             const identifiedBy = document.getElementById('identified-by');
             if (identifiedBy) {
-                identifiedBy.textContent = contentRecord.identifiedBy || 'Not specified';
+                identifiedBy.innerHTML = signerIdentity.identifiedByHtml || escapeHtml(contentRecord.identifiedBy || 'Not specified');
             }
             
             // Signed by
             const signedBy = document.getElementById('signed-by');
             if (signedBy) {
-                signedBy.textContent = contentRecord.signedBy || 'Not signed';
+                signedBy.innerHTML = signerIdentity.signedByHtml || escapeHtml(contentRecord.signedBy || 'Not signed');
             }
         }
 
@@ -1464,6 +1668,7 @@
             // Extract certificate information
             const certificates = metadata.certificates || [];
             const caiClaims = metadata.caiClaims || {};
+            const publicKey = caiClaims.publicKey || metadata.structuredMetadata?.['starling:PublicKey'];
             
             let html = '';
             
@@ -1514,6 +1719,63 @@
                     <div class="detailed-item">
                         <span class="detailed-label">XMP Signature Reference:</span>
                         <span class="detailed-value">${caiClaims.signatureReference}</span>
+                    </div>
+                `;
+                html += '</div>';
+            }
+
+            if (caiClaims.signaturePlaceholder) {
+                html += '<div class="detailed-section"><h4>Signature Placeholder</h4>';
+                html += `
+                    <div class="detailed-item">
+                        <span class="detailed-label">Placeholder:</span>
+                        <span class="detailed-value">${escapeHtml(caiClaims.signaturePlaceholder)}</span>
+                    </div>
+                    <div class="detailed-item">
+                        <span class="detailed-label">Status:</span>
+                        <span class="detailed-value">This file references a CAI signature placeholder instead of embedding an X.509 certificate.</span>
+                    </div>
+                `;
+                html += '</div>';
+            }
+
+            if (publicKey) {
+                const publicKeyInfo = caiClaims.publicKeyInfo || null;
+                html += '<div class="detailed-section"><h4>Public Key</h4>';
+                html += `
+                    <div class="detailed-item">
+                        <span class="detailed-label">Key Type:</span>
+                        <span class="detailed-value">PGP public key block embedded in CAI data</span>
+                    </div>
+                    ${publicKeyInfo ? `
+                        <div class="detailed-item">
+                            <span class="detailed-label">Fingerprint:</span>
+                            <span class="detailed-value">${escapeHtml(publicKeyInfo.fingerprint || 'Not parsed')}</span>
+                        </div>
+                        <div class="detailed-item">
+                            <span class="detailed-label">Key ID:</span>
+                            <span class="detailed-value">${escapeHtml(publicKeyInfo.keyId || 'Not parsed')}</span>
+                        </div>
+                        <div class="detailed-item">
+                            <span class="detailed-label">Algorithm:</span>
+                            <span class="detailed-value">${escapeHtml(publicKeyInfo.algorithm || 'Not parsed')}${publicKeyInfo.bits ? `, ${escapeHtml(String(publicKeyInfo.bits))} bit` : ''}</span>
+                        </div>
+                        <div class="detailed-item">
+                            <span class="detailed-label">Created:</span>
+                            <span class="detailed-value">${escapeHtml(formatTimestamp(publicKeyInfo.created || 'Not parsed'))}</span>
+                        </div>
+                        ${(publicKeyInfo.userIds || []).length > 0 ? `
+                            <div class="detailed-item">
+                                <span class="detailed-label">User IDs:</span>
+                                <span class="detailed-value">${publicKeyInfo.userIds.map(escapeHtml).join(', ')}</span>
+                            </div>
+                        ` : ''}
+                    ` : ''}
+                    <div class="detailed-item">
+                        <span class="detailed-label">Key Data:</span>
+                        <div class="detailed-value">
+                            <textarea readonly style="width: 100%; height: 180px; font-family: monospace; font-size: 11px; border: 1px solid #ddd; padding: 5px;">${publicKey}</textarea>
+                        </div>
                     </div>
                 `;
                 html += '</div>';
@@ -1633,6 +1895,199 @@
             }
         }
 
+        function getDisplayLocation(metadata) {
+            const exifTags = metadata.exifData?.tags || {};
+            const structured = metadata.structuredMetadata || {};
+
+            if (exifTags.Location) {
+                return exifTags.Location;
+            }
+
+            const broadLocation = [
+                structured.Location || structured.location || null,
+                structured.City || structured.city || null,
+                structured.State || structured.state || null,
+                structured.Country || structured.country || null
+            ].filter(Boolean);
+
+            if (broadLocation.length > 0) {
+                return broadLocation.join(', ');
+            }
+
+            return null;
+        }
+
+        function getProducedOn(metadata) {
+            const actionEntries = metadata.detailedAssertions?.actions;
+            if (Array.isArray(actionEntries) && actionEntries.length > 0) {
+                const datedAction = actionEntries.findLast
+                    ? actionEntries.findLast(action => action && (action['stEvt:when'] || action.when))
+                    : [...actionEntries].reverse().find(action => action && (action['stEvt:when'] || action.when));
+                const when = datedAction && (datedAction['stEvt:when'] || datedAction.when);
+                if (when) {
+                    return formatTimestamp(when);
+                }
+            }
+
+            const exifTags = metadata.exifData?.tags || {};
+            const structured = metadata.structuredMetadata || {};
+            const candidates = [
+                exifTags.CreateDate,
+                exifTags.DateTimeOriginal,
+                structured.CreateDate,
+                structured.DateTimeOriginal,
+                metadata.caiClaims?.when
+            ];
+
+            const first = candidates.find(Boolean);
+            return first ? formatTimestamp(first) : null;
+        }
+
+        function getSignerIdentity(metadata) {
+            const claims = metadata.caiClaims || {};
+            const publicKeyInfo = claims.publicKeyInfo || null;
+            const publicKey = claims.publicKey || metadata.structuredMetadata?.['starling:PublicKey'] || '';
+            const knownKeyMatch = getKnownPublicKeyMatch(publicKeyInfo, publicKey);
+
+            if (publicKeyInfo?.fingerprint) {
+                const known = knownKeyMatch;
+                const primary = known?.label || (publicKeyInfo.userIds || [])[0] || publicKeyInfo.keyId || publicKeyInfo.fingerprint;
+                const secondary = formatPublicKeySecondary(publicKeyInfo);
+                const html = `
+                    <span class="identity-primary">${escapeHtml(primary)}</span>
+                    <span class="identity-secondary">${escapeHtml(secondary)}</span>
+                `;
+                return {
+                    identifiedByHtml: html,
+                    signedByHtml: html
+                };
+            }
+
+            if (publicKey) {
+                const primary = knownKeyMatch?.label || 'OpenPGP public key';
+                const secondary = knownKeyMatch?.secondary || getPublicKeyFallbackIdentifier(publicKey);
+                const html = `
+                    <span class="identity-primary">${escapeHtml(primary)}</span>
+                    <span class="identity-secondary">${escapeHtml(secondary)}</span>
+                `;
+                return {
+                    identifiedByHtml: html,
+                    signedByHtml: html
+                };
+            }
+
+            if (claims.signaturePlaceholder) {
+                const html = `
+                    <span class="identity-primary">${escapeHtml(claims.signaturePlaceholder)}</span>
+                    <span class="identity-secondary">Signature placeholder</span>
+                `;
+                return {
+                    identifiedByHtml: null,
+                    signedByHtml: html
+                };
+            }
+
+            return {
+                identifiedByHtml: null,
+                signedByHtml: null
+            };
+        }
+
+        function getKnownPublicKeyMatch(publicKeyInfo, publicKey) {
+            const byFingerprint = {
+                '3002BC5024DF8D23124FDCBD8FE52A3E80C4BB89': {
+                    label: 'Reuters',
+                    secondary: 'PGP fingerprint 3002BC5024DF8D23124FDCBD8FE52A3E80C4BB89'
+                }
+            };
+
+            if (publicKeyInfo?.fingerprint && byFingerprint[publicKeyInfo.fingerprint]) {
+                return byFingerprint[publicKeyInfo.fingerprint];
+            }
+
+            const normalized = String(publicKey).replace(/\s+/g, '');
+            if (normalized.includes('mQINBF5emRQBEAC0YLMyonrxATGR4feYkcH+cTWOnnqUPp6kQ2B48RAUodglCUxr')) {
+                return {
+                    label: 'Reuters',
+                    secondary: 'PGP fingerprint 3002BC5024DF8D23124FDCBD8FE52A3E80C4BB89'
+                };
+            }
+
+            return null;
+        }
+
+        function formatPublicKeySecondary(publicKeyInfo) {
+            if (publicKeyInfo?.fingerprint) {
+                return publicKeyInfo.fingerprint;
+            }
+            if (publicKeyInfo?.keyId) {
+                return publicKeyInfo.keyId;
+            }
+            if ((publicKeyInfo?.userIds || []).length > 0) {
+                return (publicKeyInfo.userIds || [])[0];
+            }
+            return 'Embedded OpenPGP public key';
+        }
+
+        function getPublicKeyFallbackIdentifier(publicKey) {
+            const keyIdMatch = String(publicKey).match(/([A-F0-9]{16,40})/i);
+            if (keyIdMatch) {
+                const token = keyIdMatch[1].toUpperCase();
+                return token;
+            }
+            return 'Embedded OpenPGP public key';
+        }
+
+        function getStarlingIntegrityData(metadata) {
+            const integrity = metadata.caiClaims?.starlingIntegrity || {};
+            const items = [];
+
+            if (integrity['starling:FilecoinCID_Explorer']) {
+                items.push({
+                    label: 'Filecoin CID',
+                    value: integrity['starling:FileconCID'] || integrity['starling:FilecoinCID_Explorer'],
+                    url: integrity['starling:FilecoinCID_Explorer']
+                });
+            }
+
+            if (integrity['starling:IPFSCID_Explorer']) {
+                items.push({
+                    label: 'IPFS CID',
+                    value: integrity['starling:IPFSCID'] || integrity['starling:IPFSCID_Explorer'],
+                    url: integrity['starling:IPFSCID_Explorer']
+                });
+            }
+
+            if (integrity['starling:HederaHx_Explorer']) {
+                items.push({
+                    label: 'Hedera TX',
+                    value: integrity['starling:HederaHx'] || integrity['starling:HederaHx_Explorer'],
+                    url: integrity['starling:HederaHx_Explorer']
+                });
+            }
+
+            if (integrity['starling:GUNNetwork_Explorer']) {
+                items.push({
+                    label: 'Gun Network',
+                    value: integrity['starling:GUNNetwork'] || integrity['starling:GUNNetwork_Explorer'],
+                    url: integrity['starling:GUNNetwork_Explorer']
+                });
+            }
+
+            return items;
+        }
+
+        function toggleIntegrityStorage() {
+            const panel = document.getElementById('starling-storage-panel');
+            const toggle = document.getElementById('starling-storage-toggle');
+            if (!panel || !toggle) {
+                return;
+            }
+
+            const isOpen = panel.classList.toggle('open');
+            toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        }
+
         function formatDistinguishedName(nameInfo) {
             if (!nameInfo || typeof nameInfo !== 'object') {
                 return 'Not specified';
@@ -1706,6 +2161,19 @@
             `;
         }
 
+        function formatStoreSummary(recorder) {
+            const secondary = recorder ? `in ${escapeHtml(recorder)}` : '';
+            return `
+                <div class="action-entry">
+                    <div class="action-marker"></div>
+                    <div class="action-body">
+                        <div class="action-primary">Store</div>
+                        ${secondary ? `<div class="action-secondary">${secondary}</div>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
         function humanizeActionName(actionName) {
             const normalized = String(actionName);
             if (normalized === 'cai.edit') {
@@ -1729,6 +2197,8 @@
             const primaryCert = metadata.certificates && metadata.certificates.length > 0
                 ? metadata.certificates[0]
                 : null;
+            const publicKey = claims.publicKey || metadata.structuredMetadata?.['starling:PublicKey'];
+            const publicKeyInfo = claims.publicKeyInfo || null;
             
             // Certificate Authority info - extract from actual certificates
             const certAuthority = document.getElementById('cert-authority');
@@ -1747,6 +2217,17 @@
                     <div class="cert-field">
                         <span class="cert-label">Location:</span>
                         <span class="cert-value">Offset ${primaryCert.offset}, ${primaryCert.length} bytes</span>
+                    </div>
+                `;
+            } else if (publicKey) {
+                certAuthority.innerHTML = `
+                    <div class="cert-field">
+                        <span class="cert-label">Public Key:</span>
+                        <span class="cert-value">PGP public key embedded in CAI data</span>
+                    </div>
+                    <div class="cert-field">
+                        <span class="cert-label">Fingerprint:</span>
+                        <span class="cert-value">${escapeHtml(publicKeyInfo?.fingerprint || 'Not parsed')}</span>
                     </div>
                 `;
             } else {
@@ -1776,6 +2257,21 @@
                     <div class="cert-field">
                         <span class="cert-label">Algorithm:</span>
                         <span class="cert-value">${algorithm}</span>
+                    </div>
+                `;
+            } else if (publicKey) {
+                certValidity.innerHTML = `
+                    <div class="cert-field">
+                        <span class="cert-label">Key Format:</span>
+                        <span class="cert-value">ASCII-armored OpenPGP public key</span>
+                    </div>
+                    <div class="cert-field">
+                        <span class="cert-label">User ID:</span>
+                        <span class="cert-value">${escapeHtml((publicKeyInfo?.userIds || [])[0] || 'Not parsed')}</span>
+                    </div>
+                    <div class="cert-field">
+                        <span class="cert-label">Algorithm:</span>
+                        <span class="cert-value">${escapeHtml(publicKeyInfo?.algorithm || 'Not parsed')}${publicKeyInfo?.bits ? `, ${escapeHtml(String(publicKeyInfo.bits))} bit` : ''}</span>
                     </div>
                 `;
             } else {
@@ -1832,6 +2328,12 @@
                     <span class="status-indicator">📋</span>
                     <span class="status-text">Validated X.509 certificate structure found. Cryptographic signature verification is still not implemented.</span>
                 `;
+            } else if (claims.signaturePlaceholder) {
+                signatureStatus.className = 'signature-status warning';
+                signatureStatus.innerHTML = `
+                    <span class="status-indicator">🧩</span>
+                    <span class="status-text">This file uses signature placeholder <strong>${escapeHtml(claims.signaturePlaceholder)}</strong> and does not embed an X.509 certificate.</span>
+                `;
             } else {
                 signatureStatus.className = 'signature-status invalid';
                 signatureStatus.innerHTML = `
@@ -1866,14 +2368,6 @@
             }
         }
 
-        // Auto-load URL parameter if present
-        window.addEventListener('DOMContentLoaded', () => {
-            const urlParams = new URLSearchParams(window.location.search);
-            const sourceUrl = urlParams.get('source');
-            if (sourceUrl) {
-                loadImageFromUrl(sourceUrl);
-            }
-        });
     </script>
 </body>
 </html>

@@ -49,7 +49,8 @@ class JUMBFParser {
                 rights: null,
                 identity: null,
                 actions: null,
-                acquisition: null
+                acquisition: null,
+                integrity: null
             }
         };
 
@@ -62,6 +63,9 @@ class JUMBFParser {
             this.parseJPEGSegments(bytes, result);
             result.certificates = this.extractCertificates(bytes);
             this.processCAIData(result);
+            if (result.caiClaims.publicKey) {
+                result.caiClaims.publicKeyInfo = await this.parsePGPPublicKey(result.caiClaims.publicKey);
+            }
         } catch (error) {
             result.errors.push(`Parse error: ${error.message}`);
         }
@@ -175,8 +179,30 @@ class JUMBFParser {
             const segmentText = this.sanitizeText(this.textDecoder.decode(data));
             const boxes = this.extractBoxesFromSegment(data, segmentText, segmentOffset);
             result.jumbfBoxes.push(...boxes);
+            this.extractStandaloneMetadataFromSegment(segmentText, result);
         } catch (error) {
             result.errors.push(`APP11 parse error: ${error.message}`);
+        }
+    }
+
+    extractStandaloneMetadataFromSegment(segmentText, result) {
+        const publicKeyMarker = segmentText.indexOf('"starling:PublicKey"');
+        if (publicKeyMarker >= 0) {
+            const jsonStart = segmentText.lastIndexOf('{', publicKeyMarker);
+            if (jsonStart >= 0) {
+                const extracted = this.extractBalancedJson(segmentText, jsonStart);
+                if (extracted) {
+                    try {
+                        const parsed = JSON.parse(extracted.json);
+                        if (parsed['starling:PublicKey']) {
+                            result.caiClaims.publicKey = parsed['starling:PublicKey'];
+                            result.structuredMetadata['starling:PublicKey'] = parsed['starling:PublicKey'];
+                        }
+                    } catch {
+                        // Ignore standalone JSON parsing failures.
+                    }
+                }
+            }
         }
     }
 
@@ -272,7 +298,8 @@ class JUMBFParser {
 
             const byteOrder = littleEndian ? 'LE' : 'BE';
             const firstIFDOffset = this.readUInt32(data, tiffOffset + 4, byteOrder);
-            this.parseEXIFIFD(data, tiffOffset, tiffOffset + firstIFDOffset, byteOrder, exif.tags, 0);
+            this.parseEXIFIFD(data, tiffOffset, tiffOffset + firstIFDOffset, byteOrder, exif.tags, 0, 'ifd0');
+            this.finalizeEXIFTags(exif.tags);
         } catch (error) {
             exif.error = error.message;
         }
@@ -280,7 +307,7 @@ class JUMBFParser {
         return exif;
     }
 
-    parseEXIFIFD(data, tiffOffset, ifdOffset, byteOrder, tags, depth) {
+    parseEXIFIFD(data, tiffOffset, ifdOffset, byteOrder, tags, depth, directoryType) {
         if (depth > 4 || ifdOffset <= 0 || ifdOffset + 2 > data.length) {
             return;
         }
@@ -298,7 +325,7 @@ class JUMBFParser {
             const valueOffset = entryOffset + 8;
             const value = this.readEXIFValue(data, tiffOffset, type, count, valueOffset, byteOrder);
 
-            const tagName = this.getEXIFTagName(tag);
+            const tagName = this.getEXIFTagName(tag, directoryType);
             if (tagName && value !== null && value !== '') {
                 tags[tagName] = value;
             }
@@ -306,7 +333,15 @@ class JUMBFParser {
             if (tag === 0x8769 || tag === 0x8825) {
                 const nestedOffset = this.readUInt32(data, valueOffset, byteOrder);
                 if (nestedOffset > 0) {
-                    this.parseEXIFIFD(data, tiffOffset, tiffOffset + nestedOffset, byteOrder, tags, depth + 1);
+                    this.parseEXIFIFD(
+                        data,
+                        tiffOffset,
+                        tiffOffset + nestedOffset,
+                        byteOrder,
+                        tags,
+                        depth + 1,
+                        tag === 0x8825 ? 'gps' : 'exif'
+                    );
                 }
             }
         }
@@ -348,9 +383,45 @@ class JUMBFParser {
                 return count === 1 ? this.readUInt16(data, dataOffset, byteOrder) : this.readUIntArray(data, dataOffset, count, 2, byteOrder);
             case 4:
                 return count === 1 ? this.readUInt32(data, dataOffset, byteOrder) : this.readUIntArray(data, dataOffset, count, 4, byteOrder);
+            case 5:
+                return count === 1
+                    ? this.readRational(data, dataOffset, byteOrder, false)
+                    : this.readRationalArray(data, dataOffset, count, byteOrder, false);
+            case 10:
+                return count === 1
+                    ? this.readRational(data, dataOffset, byteOrder, true)
+                    : this.readRationalArray(data, dataOffset, count, byteOrder, true);
             default:
                 return null;
         }
+    }
+
+    finalizeEXIFTags(tags) {
+        const lat = this.normalizeGPSCoordinate(tags.GPSLatitude, tags.GPSLatitudeRef);
+        const lng = this.normalizeGPSCoordinate(tags.GPSLongitude, tags.GPSLongitudeRef);
+
+        if (lat !== null) {
+            tags.GPSLatitudeDecimal = lat;
+        }
+        if (lng !== null) {
+            tags.GPSLongitudeDecimal = lng;
+        }
+        if (lat !== null && lng !== null) {
+            tags.Location = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+        }
+    }
+
+    normalizeGPSCoordinate(value, ref) {
+        if (!Array.isArray(value) || value.length < 3) {
+            return null;
+        }
+
+        const [degrees, minutes, seconds] = value.map((part) => Number(part) || 0);
+        let decimal = degrees + (minutes / 60) + (seconds / 3600);
+        if (ref === 'S' || ref === 'W') {
+            decimal *= -1;
+        }
+        return Number.isFinite(decimal) ? decimal : null;
     }
 
     mergeEXIFIntoContentRecord(exifData, result) {
@@ -368,8 +439,8 @@ class JUMBFParser {
         }
     }
 
-    getEXIFTagName(tag) {
-        const tagMap = {
+    getEXIFTagName(tag, directoryType) {
+        const commonTagMap = {
             0x010E: 'ImageDescription',
             0x010F: 'Make',
             0x0110: 'Model',
@@ -380,12 +451,28 @@ class JUMBFParser {
             0x9004: 'CreateDate'
         };
 
-        return tagMap[tag] || null;
+        const gpsTagMap = {
+            0x0001: 'GPSLatitudeRef',
+            0x0002: 'GPSLatitude',
+            0x0003: 'GPSLongitudeRef',
+            0x0004: 'GPSLongitude',
+            0x0005: 'GPSAltitudeRef',
+            0x0006: 'GPSAltitude',
+            0x0007: 'GPSTimeStamp',
+            0x0012: 'GPSMapDatum',
+            0x001D: 'GPSDateStamp'
+        };
+
+        if (directoryType === 'gps') {
+            return gpsTagMap[tag] || null;
+        }
+
+        return commonTagMap[tag] || null;
     }
 
     extractBoxesFromSegment(segmentBytes, segmentText, segmentOffset) {
         const labels = [];
-        const labelPattern = /\b(cai\.[A-Za-z0-9._-]+|adobe\.asset\.info)\b/g;
+        const labelPattern = /\b(cai\.[A-Za-z0-9._-]+|adobe\.asset\.info|starling\.[A-Za-z0-9._-]+)\b/g;
         let match;
 
         while ((match = labelPattern.exec(segmentText)) !== null) {
@@ -446,7 +533,7 @@ class JUMBFParser {
         }
 
         const leadingText = bodyWindow.slice(0, jsonMarker);
-        if (/\b(cai\.[A-Za-z0-9._-]+|adobe\.asset\.info)\b/.test(leadingText)) {
+        if (/\b(cai\.[A-Za-z0-9._-]+|adobe\.asset\.info|starling\.[A-Za-z0-9._-]+)\b/.test(leadingText)) {
             return null;
         }
 
@@ -534,6 +621,12 @@ class JUMBFParser {
                 return;
             }
 
+            if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+                if (payload['starling:PublicKey']) {
+                    result.caiClaims.publicKey = payload['starling:PublicKey'];
+                }
+            }
+
             assertionsByType.set(label, {
                 type: label,
                 source: 'JUMBF',
@@ -591,12 +684,35 @@ class JUMBFParser {
                     }
                     providers.add('Adobe');
                     break;
+                case 'starling.integrity':
+                    if (payload && typeof payload === 'object') {
+                        result.detailedAssertions.integrity = payload;
+                        result.caiClaims.starlingIntegrity = payload;
+                        result.structuredMetadata = { ...result.structuredMetadata, ...payload };
+                        if (payload['starling:PublicKey']) {
+                            result.caiClaims.publicKey = payload['starling:PublicKey'];
+                        }
+                    }
+                    providers.add('Starling');
+                    break;
+                case 'cai.signature':
+                    {
+                        const placeholderMatch = box.content && box.content.match(/signature placeholder:([^\s]+)/i);
+                        if (placeholderMatch) {
+                            result.caiClaims.signaturePlaceholder = placeholderMatch[1];
+                        }
+                        providers.add('CAI');
+                    }
+                    break;
                 default:
                     if (label.startsWith('cai.')) {
                         providers.add('CAI');
                     }
                     if (label.startsWith('adobe.')) {
                         providers.add('Adobe');
+                    }
+                    if (label.startsWith('starling.')) {
+                        providers.add('Starling');
                     }
                     break;
             }
@@ -619,6 +735,13 @@ class JUMBFParser {
 
         if (!result.contentRecord.producedWith && result.caiClaims.recorder) {
             result.contentRecord.producedWith = result.caiClaims.recorder;
+        }
+
+        if (result.caiClaims.recorder && /starling store/i.test(result.caiClaims.recorder)) {
+            const hasStoreActivity = result.contentRecord.editsAndActivity.some((entry) => /store/i.test(String(entry)));
+            if (!hasStoreActivity) {
+                result.contentRecord.editsAndActivity.push('Store');
+            }
         }
 
         if (!result.contentRecord.producer) {
@@ -689,7 +812,7 @@ class JUMBFParser {
 
     parseAssertionReference(reference) {
         const clean = String(reference);
-        const typeMatch = clean.match(/\/(cai\.[^/?]+|adobe\.[^/?]+)(?:\?|$)/);
+        const typeMatch = clean.match(/\/(cai\.[^/?]+|adobe\.[^/?]+|starling\.[^/?]+)(?:\?|$)/);
         const hashMatch = clean.match(/[?&]hl=([^&]+)/);
 
         return {
@@ -751,6 +874,216 @@ class JUMBFParser {
         }
         const summary = this.formatDistinguishedName(nameInfo);
         return summary || null;
+    }
+
+    async parsePGPPublicKey(armoredKey) {
+        try {
+            const normalized = this.normalizePGPArmor(armoredKey);
+            const bytes = this.decodePGPArmor(normalized);
+            if (!bytes || bytes.length === 0) {
+                return null;
+            }
+
+            const packets = this.readOpenPGPPackets(bytes);
+            const info = {
+                userIds: [],
+                subkeys: []
+            };
+
+            for (const packet of packets) {
+                if (packet.tag === 6) {
+                    const parsed = await this.parseOpenPGPPublicKeyPacket(packet.body);
+                    if (parsed) {
+                        info.fingerprint = parsed.fingerprint || null;
+                        info.keyId = parsed.keyId || null;
+                        info.algorithm = parsed.algorithm || null;
+                        info.bits = parsed.bits || null;
+                        info.created = parsed.created || null;
+                    }
+                } else if (packet.tag === 13) {
+                    info.userIds.push(this.textDecoder.decode(packet.body));
+                } else if (packet.tag === 14) {
+                    const parsedSubkey = await this.parseOpenPGPPublicKeyPacket(packet.body);
+                    if (parsedSubkey) {
+                        info.subkeys.push(parsedSubkey);
+                    }
+                }
+            }
+
+            return Object.keys(info).length > 0 ? info : null;
+        } catch {
+            return null;
+        }
+    }
+
+    normalizePGPArmor(block) {
+        if (!block) {
+            return '';
+        }
+
+        const begin = '-----BEGIN PGP PUBLIC KEY BLOCK-----';
+        const end = '-----END PGP PUBLIC KEY BLOCK-----';
+        const start = block.indexOf(begin);
+        const finish = block.indexOf(end);
+        if (start < 0 || finish < 0) {
+            return block;
+        }
+
+        let body = block.slice(start + begin.length, finish).replace(/\s+/g, '');
+        body = body.replace(/^Version:[^m]+/, '');
+
+        let checksum = '';
+        const crcMatch = body.match(/([A-Za-z0-9+/]+={0,2})([A-Za-z0-9+/]{4})$/);
+        if (crcMatch && crcMatch[1].endsWith('==')) {
+            body = crcMatch[1];
+            checksum = crcMatch[2];
+        }
+
+        const lines = [begin, ''];
+        for (let i = 0; i < body.length; i += 64) {
+            lines.push(body.slice(i, i + 64));
+        }
+        if (checksum) {
+            lines.push(`=${checksum}`);
+        }
+        lines.push(end, '');
+        return lines.join('\n');
+    }
+
+    decodePGPArmor(armored) {
+        const base64 = armored
+            .split('\n')
+            .filter((line) => line && !line.startsWith('-----') && !line.startsWith('=') && !line.includes(':'))
+            .join('');
+
+        return Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+    }
+
+    readOpenPGPPackets(bytes) {
+        const packets = [];
+        let offset = 0;
+
+        while (offset < bytes.length) {
+            const header = bytes[offset];
+            if ((header & 0x80) === 0) {
+                break;
+            }
+
+            let tag;
+            let lengthInfo;
+            if (header & 0x40) {
+                tag = header & 0x3F;
+                lengthInfo = this.readNewPacketLength(bytes, offset + 1);
+                if (!lengthInfo) break;
+                const bodyStart = offset + 1 + lengthInfo.headerBytes;
+                packets.push({ tag, body: bytes.slice(bodyStart, bodyStart + lengthInfo.length) });
+                offset = bodyStart + lengthInfo.length;
+            } else {
+                tag = (header >> 2) & 0x0F;
+                lengthInfo = this.readOldPacketLength(bytes, offset + 1, header & 0x03);
+                if (!lengthInfo) break;
+                const bodyStart = offset + 1 + lengthInfo.headerBytes;
+                packets.push({ tag, body: bytes.slice(bodyStart, bodyStart + lengthInfo.length) });
+                offset = bodyStart + lengthInfo.length;
+            }
+        }
+
+        return packets;
+    }
+
+    readNewPacketLength(bytes, offset) {
+        if (offset >= bytes.length) return null;
+        const first = bytes[offset];
+        if (first < 192) {
+            return { length: first, headerBytes: 1 };
+        }
+        if (first < 224) {
+            if (offset + 1 >= bytes.length) return null;
+            return {
+                length: ((first - 192) << 8) + bytes[offset + 1] + 192,
+                headerBytes: 2
+            };
+        }
+        if (first === 255) {
+            if (offset + 4 >= bytes.length) return null;
+            return {
+                length: ((bytes[offset + 1] << 24) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 8) | bytes[offset + 4]) >>> 0,
+                headerBytes: 5
+            };
+        }
+        return null;
+    }
+
+    readOldPacketLength(bytes, offset, lengthType) {
+        if (lengthType === 0) {
+            return { length: bytes[offset], headerBytes: 1 };
+        }
+        if (lengthType === 1) {
+            return { length: (bytes[offset] << 8) | bytes[offset + 1], headerBytes: 2 };
+        }
+        if (lengthType === 2) {
+            return {
+                length: ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0,
+                headerBytes: 4
+            };
+        }
+        return null;
+    }
+
+    async parseOpenPGPPublicKeyPacket(body) {
+        if (!body || body.length < 6) {
+            return null;
+        }
+
+        const version = body[0];
+        if (version !== 4) {
+            return null;
+        }
+
+        const createdSeconds = ((body[1] << 24) | (body[2] << 16) | (body[3] << 8) | body[4]) >>> 0;
+        const algorithmId = body[5];
+        const algorithm = this.getOpenPGPAlgorithmName(algorithmId);
+        let bits = null;
+
+        if ([1, 2, 3].includes(algorithmId) && body.length >= 8) {
+            bits = (body[6] << 8) | body[7];
+        }
+
+        let fingerprint = null;
+        let keyId = null;
+        const subtle = globalThis.crypto && globalThis.crypto.subtle;
+        if (subtle && body.length <= 0xFFFF) {
+            const fingerprintInput = new Uint8Array(body.length + 3);
+            fingerprintInput[0] = 0x99;
+            fingerprintInput[1] = (body.length >> 8) & 0xFF;
+            fingerprintInput[2] = body.length & 0xFF;
+            fingerprintInput.set(body, 3);
+            const digest = new Uint8Array(await subtle.digest('SHA-1', fingerprintInput));
+            fingerprint = this.bytesToHex(digest).toUpperCase();
+            keyId = fingerprint.slice(-16);
+        }
+
+        return {
+            fingerprint,
+            keyId,
+            algorithm,
+            bits,
+            created: new Date(createdSeconds * 1000).toISOString()
+        };
+    }
+
+    getOpenPGPAlgorithmName(id) {
+        const names = {
+            1: 'RSA',
+            2: 'RSA Encrypt-Only',
+            3: 'RSA Sign-Only',
+            16: 'ElGamal',
+            17: 'DSA',
+            18: 'ECDH',
+            19: 'ECDSA',
+            22: 'EdDSA'
+        };
+        return names[id] || `Algorithm ${id}`;
     }
 
     extractCertificates(bytes) {
@@ -1126,6 +1459,28 @@ class JUMBFParser {
                 : this.readUInt32(data, offset + (i * size), byteOrder));
         }
         return values;
+    }
+
+    readRational(data, offset, byteOrder, signed) {
+        const numerator = signed ? this.readInt32(data, offset, byteOrder) : this.readUInt32(data, offset, byteOrder);
+        const denominator = signed ? this.readInt32(data, offset + 4, byteOrder) : this.readUInt32(data, offset + 4, byteOrder);
+        if (!denominator) {
+            return 0;
+        }
+        return numerator / denominator;
+    }
+
+    readRationalArray(data, offset, count, byteOrder, signed) {
+        const values = [];
+        for (let i = 0; i < count; i += 1) {
+            values.push(this.readRational(data, offset + (i * 8), byteOrder, signed));
+        }
+        return values;
+    }
+
+    readInt32(data, offset, byteOrder) {
+        const value = this.readUInt32(data, offset, byteOrder);
+        return value > 0x7FFFFFFF ? value - 0x100000000 : value;
     }
 
     bytesToHex(bytes) {
