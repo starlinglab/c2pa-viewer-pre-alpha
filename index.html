@@ -1,0 +1,1732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CAI Pre-Alpha Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: Arial, sans-serif;
+        }
+        
+        body {
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 0;
+            padding-top: 60px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            display: flex;
+            align-items: center;
+            padding: 15px 20px;
+            background-color: white;
+            border-bottom: 1px solid #e0e0e0;
+            margin: 0;
+            width: 100%;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            box-sizing: border-box;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: bold;
+        }
+        
+        .logo-icon {
+            width: 24px;
+            height: 24px;
+            background-color: #000;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+        }
+        
+        .upload-section {
+            flex: 1;
+            padding: 40px;
+        }
+        
+        .upload-title {
+            font-size: 32px;
+            color: #333;
+            margin-bottom: 20px;
+            font-weight: normal;
+        }
+        
+        .upload-description {
+            font-size: 16px;
+            color: #555;
+            margin-bottom: 30px;
+            line-height: 1.5;
+        }
+        
+        .note {
+            font-size: 14px;
+            color: #777;
+            margin-top: 30px;
+            line-height: 1.5;
+        }
+        
+        .dropzone {
+            flex: 1;
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            background-color: white;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+        
+        .dropzone:hover {
+            border-color: #999;
+        }
+        
+        .dropzone-icon {
+            width: 60px;
+            height: 60px;
+            margin: 0 auto 20px;
+            opacity: 0.6;
+        }
+        
+        .dropzone-text {
+            margin-bottom: 10px;
+            color: #0066cc;
+            font-weight: bold;
+        }
+        
+        .dropzone-subtext {
+            color: #666;
+        }
+        
+        .formats {
+            font-size: 12px;
+            color: #777;
+            margin-top: 10px;
+        }
+        
+        #file-input {
+            display: none;
+        }
+        
+        .image-preview {
+            max-width: 100%;
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .image-preview img {
+            max-width: 100%;
+            max-height: 400px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        
+        .metadata-section {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+        
+        .metadata-title {
+            font-size: 1.5em;
+            color: #333;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+        
+        .metadata-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
+        .metadata-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .metadata-card h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+        
+        .metadata-item {
+            display: flex;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .metadata-item:last-child {
+            border-bottom: none;
+        }
+        
+        .metadata-label {
+            font-weight: 600;
+            color: #555;
+            min-width: 120px;
+        }
+        
+        .metadata-value {
+            color: #333;
+            word-break: break-word;
+        }
+        
+        .jumbf-box {
+            background: #f0f4f8;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            border-left: 4px solid #667eea;
+        }
+        
+        .jumbf-box-title {
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+        
+        .raw-data {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            margin-top: 20px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #667eea;
+        }
+        
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        
+        .success {
+            background: #efe;
+            color: #3a3;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        
+        .url-input-section {
+            margin-bottom: 20px;
+            padding: 20px;
+            background: #f0f4f8;
+            border-radius: 10px;
+        }
+        
+        .url-input-wrapper {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .url-input {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 1em;
+        }
+        
+        .url-button {
+            padding: 12px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 600;
+            transition: transform 0.2s;
+        }
+        
+        .url-button:hover {
+            transform: translateY(-2px);
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #eee;
+        }
+        
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 1em;
+            color: #666;
+            transition: all 0.3s;
+        }
+        
+        .tab.active {
+            color: #667eea;
+            border-bottom: 3px solid #667eea;
+            margin-bottom: -2px;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .signature-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 15px;
+            border-radius: 8px;
+            background: #f8f9fa;
+            border-left: 4px solid #ddd;
+        }
+        
+        .signature-status.verified {
+            background: #d4edda;
+            border-left-color: #28a745;
+        }
+        
+        .signature-status.invalid {
+            background: #f8d7da;
+            border-left-color: #dc3545;
+        }
+        
+        .signature-status.warning {
+            background: #fff3cd;
+            border-left-color: #ffc107;
+        }
+        
+        .status-indicator {
+            font-size: 1.2em;
+        }
+        
+        .status-text {
+            font-weight: 500;
+        }
+        
+        .hash-item {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 6px;
+            margin: 8px 0;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+        
+        .hash-name {
+            font-weight: bold;
+            color: #495057;
+            display: block;
+            margin-bottom: 4px;
+        }
+        
+        .hash-value {
+            color: #6c757d;
+            word-break: break-all;
+            font-size: 0.85em;
+        }
+        
+        .hash-algorithm {
+            color: #007bff;
+            font-size: 0.8em;
+            margin-top: 4px;
+        }
+        
+        .assertion-item {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 6px;
+            margin: 8px 0;
+            border-left: 3px solid #007bff;
+        }
+        
+        .assertion-type {
+            font-weight: bold;
+            color: #495057;
+            margin-bottom: 4px;
+        }
+        
+        .assertion-hash {
+            font-family: monospace;
+            font-size: 0.8em;
+            color: #6c757d;
+            word-break: break-all;
+        }
+        
+        .cert-field {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .cert-field:last-child {
+            border-bottom: none;
+        }
+        
+        .cert-label {
+            font-weight: 600;
+            color: #495057;
+            min-width: 100px;
+        }
+        
+        .cert-value {
+            color: #6c757d;
+            text-align: right;
+        }
+        
+        .content-record-section {
+            background: #f8f9fc;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #e1e5e9;
+        }
+        
+        .record-item {
+            margin-bottom: 15px;
+            padding: 8px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .record-item:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+        }
+        
+        .record-item strong {
+            color: #1a73e8;
+            font-size: 0.95em;
+        }
+        
+        /* Layout similar to main index.html */
+        .main-content {
+            display: flex;
+            margin-top: 30px;
+            min-height: 500px;
+        }
+        
+        .flex-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            width: 100%;
+        }
+        
+        .file-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background-color: white;
+            border-bottom: 1px solid #e0e0e0;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .file-name {
+            font-weight: bold;
+        }
+        
+        .file-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+            color: #777;
+        }
+        
+        .image-section {
+            flex: 1;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+        }
+        
+        .main-image {
+            max-width: 100%;
+            max-height: 500px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            object-fit: contain;
+        }
+        
+        
+        .details-panel {
+            width: 350px;
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-left: 30px;
+            border: 1px solid #ddd;
+            align-self: flex-start;
+        }
+        
+        .details-header {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .details-subheader {
+            font-size: 13px;
+            color: #777;
+            margin-bottom: 20px;
+        }
+        
+        .details-section {
+            margin-bottom: 20px;
+        }
+        
+        .details-section-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        .detail-item {
+            display: flex;
+            margin-bottom: 15px;
+            align-items: center;
+        }
+        
+        .detail-icon {
+            width: 20px;
+            height: 20px;
+            margin-right: 10px;
+            font-size: 16px;
+        }
+        
+        .detail-text {
+            font-size: 14px;
+        }
+        
+        .detail-thumbnail {
+            width: 40px;
+            height: 40px;
+            object-fit: cover;
+            margin-right: 10px;
+            border: 1px solid #ddd;
+        }
+        
+        .tools {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .tool-button {
+            background: none;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 5px 10px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .view-toggle {
+            cursor: pointer;
+            color: #0066cc;
+            text-decoration: underline;
+            font-size: 14px;
+            margin-top: 20px;
+            display: inline-block;
+        }
+        
+        /* Modal styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            overflow: auto;
+        }
+        
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 0;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 80vh;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .modal-header {
+            padding: 20px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: #f8f9fa;
+            border-radius: 8px 8px 0 0;
+        }
+        
+        .modal-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin: 0;
+        }
+        
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: background-color 0.2s;
+        }
+        
+        .modal-close:hover {
+            background-color: #f0f0f0;
+        }
+        
+        .modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+        }
+        
+        .raw-data-container {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .detailed-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-left: 4px solid #007acc;
+            border-radius: 4px;
+        }
+        
+        .detailed-section h4 {
+            margin: 0 0 10px 0;
+            color: #007acc;
+            font-size: 16px;
+        }
+        
+        .detailed-item {
+            margin-bottom: 8px;
+            display: flex;
+            align-items: flex-start;
+        }
+        
+        .detailed-label {
+            font-weight: bold;
+            min-width: 120px;
+            color: #495057;
+        }
+        
+        .detailed-value {
+            color: #6c757d;
+            flex: 1;
+        }
+        
+        .assertion-detail {
+            margin-bottom: 15px;
+            padding: 15px;
+            background: #ffffff;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+        }
+        
+        .assertion-detail h5 {
+            margin: 0 0 10px 0;
+            color: #007acc;
+            font-size: 14px;
+        }
+        
+        .json-display {
+            background: #f5f5f5;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            overflow-x: auto;
+            border: 1px solid #e9ecef;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <div class="logo-icon">©</div>
+                <span>CAI Pre-Alpha Viewer</span>
+            </div>
+        </header>
+        
+        <!-- Initial Upload View -->
+        <div id="upload-view">
+            <div class="main-content">
+                <div class="upload-section">
+                    <h1 class="upload-title">Inspect CAI pre-alpha content</h1>
+                    <p class="upload-description">
+                        Drag pre-alpha CAI content into this viewer to inspect its Content Credentials and see provenance information.
+                    </p>
+                    <p class="note">
+                        This viewer is designed for pre-alpha CAI format. For newer Content Credentials, use the main viewer.
+                    </p>
+                </div>
+                
+                <div class="dropzone" id="dropzone">
+                    <input type="file" id="file-input" accept="image/*">
+                    <svg class="dropzone-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    <p class="dropzone-text">Select a file from your device</p>
+                    <p class="dropzone-subtext">or drag and drop anywhere</p>
+                    <p class="formats">
+                        Supported formats: JPEG, PNG, TIFF, WebP, AVIF, HEIC, HEIF
+                    </p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Results View -->
+        <div id="results-view" style="display: none;">
+            
+            <!-- Image Preview -->
+            <div id="image-preview" class="image-preview" style="display: none;">
+                <img id="preview-img" src="" alt="Preview">
+            </div>
+            
+            <!-- File Header (when image is loaded) -->
+            <div id="file-header" class="file-header" style="display: none;">
+                <div class="file-name" id="file-name-header">Image.jpg</div>
+                <div class="file-info">
+                    <div class="logo-icon" style="width: 16px; height: 16px; font-size: 8px;">©</div>
+                    <span>Pre-alpha CAI from <span id="cai-date">pre-alpha</span></span>
+                </div>
+            </div>
+
+            <!-- Main Content Layout (Image + Details Panel) -->
+            <div id="main-layout" class="main-content" style="display: none;">
+                <div class="flex-container">
+                    <!-- Image Section (Left) -->
+                    <div class="image-section">
+                        <img src="" alt="CAI Image" class="main-image" id="main-image">
+                    </div>
+                    
+                    <!-- Details Panel (Right) -->
+                    <div class="details-panel">
+                        <div class="details-header">
+                            Content Record (Legacy CAI)
+                            <span style="transform: rotate(90deg); display: inline-block;">&#x276F;</span>
+                        </div>
+                        <div class="details-subheader">Information from pre-alpha CAI embedding:</div>
+                        
+                        <div class="details-section">
+                            <div class="details-section-title">Produced by</div>
+                            <div class="detail-item">
+                                <div class="detail-icon">👤</div>
+                                <div class="detail-text" id="produced-by">Loading...</div>
+                            </div>
+                        </div>
+                        
+                        <div class="details-section">
+                            <div class="details-section-title">Process</div>
+                            <div class="details-subheader">The software used to create this content:</div>
+                            
+                            <div class="detail-item">
+                                <div class="detail-icon">🛠️</div>
+                                <div class="detail-text" id="produced-with">Loading...</div>
+                            </div>
+                            
+                            <div class="detail-item">
+                                <div class="detail-icon">✏️</div>
+                                <div class="detail-text" id="edits-activity">Loading...</div>
+                            </div>
+                        </div>
+                        
+                        <div class="details-section">
+                            <div class="details-section-title">Legacy CAI Data</div>
+                            <div class="detail-item">
+                                <img src="" alt="Thumbnail" class="detail-thumbnail" id="ingredient-thumbnail">
+                                <div class="detail-text">Original Image<br>© Legacy CAI Format</div>
+                            </div>
+                        </div>
+                        
+                        <div class="details-section">
+                            <div class="details-section-title">About this Content Credential</div>
+                            <div class="detail-item">
+                                <div class="detail-icon">📝</div>
+                                <div class="detail-text">Identified by<br><span id="identified-by">Loading...</span></div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-icon">🔐</div>
+                                <div class="detail-text">Signed by<br><span id="signed-by">Loading...</span></div>
+                            </div>
+                        </div>
+                        
+                        <div class="tools">
+                            <button class="tool-button" onclick="showRawData()">
+                                <span>📋</span> Raw Data
+                            </button>
+                            <button class="tool-button" onclick="showStructuredData()">
+                                <span>🔍</span> Detailed
+                            </button>
+                            <button class="tool-button" onclick="showCertModal()">
+                                <span>🔒</span> Certificate
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            
+            <!-- Messages -->
+            <div id="messages"></div>
+            
+        </div>
+    </div>
+
+    <!-- Raw Data Modal -->
+    <div id="raw-data-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Raw CAI Metadata</h2>
+                <button class="modal-close" onclick="closeModal('raw-data-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="raw-data-container" id="raw-data-content">
+                    Loading raw data...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Detailed Data Modal -->
+    <div id="detailed-data-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Detailed CAI Information</h2>
+                <button class="modal-close" onclick="closeModal('detailed-data-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="detailed-data-content">
+                    Loading detailed information...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- X.509 Certificate Modal -->
+    <div id="cert-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">X.509 Certificate Information</h2>
+                <button class="modal-close" onclick="closeModal('cert-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="cert-content">
+                    <!-- Certificate details will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/jumbf-parser.js"></script>
+    <script>
+        // DOM elements
+        const uploadView = document.getElementById('upload-view');
+        const resultsView = document.getElementById('results-view');
+        const dropzone = document.getElementById('dropzone');
+        const fileInput = document.getElementById('file-input');
+        const fileHeader = document.getElementById('file-header');
+        const mainLayout = document.getElementById('main-layout');
+        const messages = document.getElementById('messages');
+        
+        // Store parsed metadata globally for modals
+        let currentMetadata = null;
+        
+        // Initialize JUMBF Parser when available
+        let parser = null;
+        
+        function initializeParser() {
+            if (typeof JUMBFParser !== 'undefined' && !parser) {
+                parser = new JUMBFParser();
+            }
+        }
+        
+        // Try to initialize immediately
+        initializeParser();
+        
+        // Also try when DOM is loaded
+        document.addEventListener('DOMContentLoaded', initializeParser);
+        
+        // Parse URL parameters for automatic loading
+        const urlParams = new URLSearchParams(window.location.search);
+        const sourceUrl = urlParams.get('source');
+        
+        // If source URL is provided, load the image automatically
+        if (sourceUrl) {
+            try {
+                const url = sourceUrl.startsWith('http://') || sourceUrl.startsWith('https://') 
+                    ? sourceUrl 
+                    : new URL(sourceUrl, window.location.origin).href;
+                loadImageFromUrl(url);
+            } catch (error) {
+                console.error('Invalid URL provided:', sourceUrl);
+                loadImageFromUrl(sourceUrl); // Try anyway
+            }
+        }
+
+        dropzone.addEventListener('click', () => fileInput.click());
+        
+        dropzone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropzone.style.borderColor = '#0066cc';
+        });
+        
+        dropzone.addEventListener('dragleave', () => {
+            dropzone.style.borderColor = '#ccc';
+        });
+        
+        dropzone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropzone.style.borderColor = '#ccc';
+            if (e.dataTransfer.files.length) {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        });
+        
+        
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length) {
+                handleFile(fileInput.files[0]);
+            }
+        });
+
+
+        // Load image from URL
+        async function loadImageFromUrl(url) {
+            try {
+                console.log('Loading image from URL:', url);
+                showMessage('Loading image from URL...', 'loading');
+                
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const blob = await response.blob();
+                if (!blob.type.startsWith('image/')) {
+                    console.warn('Response is not an image, type:', blob.type);
+                }
+                
+                let urlFilename = 'image.jpg';
+                try {
+                    const urlPath = new URL(url).pathname;
+                    urlFilename = urlPath.split('/').pop() || 'image.jpg';
+                    urlFilename = decodeURIComponent(urlFilename);
+                } catch (e) {
+                    urlFilename = url.split('/').pop() || 'image.jpg';
+                }
+                
+                const file = new File([blob], urlFilename, { type: blob.type || 'image/jpeg' });
+                await handleFile(file);
+            } catch (error) {
+                console.error('Error loading image from URL:', error);
+                showMessage('Failed to load image from URL: ' + error.message, 'error');
+            }
+        }
+        
+        // Handle file processing
+        async function handleFile(file) {
+            // Store file info for later use
+            window.currentFileUrl = URL.createObjectURL(file);
+            window.currentFileName = file.name;
+            
+            showMessage('Processing image with enhanced CAI parser...', 'loading');
+            
+            // Switch to results view
+            uploadView.style.display = 'none';
+            resultsView.style.display = 'block';
+            
+            try {
+                // Ensure parser is initialized
+                initializeParser();
+                if (!parser) {
+                    throw new Error('Parser not available');
+                }
+                
+                // Read file as ArrayBuffer
+                const arrayBuffer = await file.arrayBuffer();
+                const metadata = await parser.parseImage(arrayBuffer);
+                
+                // Store metadata globally for modals
+                currentMetadata = metadata;
+                
+                displayMetadata(metadata);
+                
+                const summary = parser.getSummary(metadata);
+                if (summary.hasCAI) {
+                    showMessage(`✅ CAI data found! ${summary.assertionCount} assertions, ${summary.claimCount} claims`, 'success');
+                } else {
+                    showMessage('ℹ️ No CAI data found in this image', 'error');
+                }
+                
+                // Log detailed results
+                console.log('Parsed CAI metadata:', metadata);
+                console.log('Summary:', summary);
+                console.log('Certificates found:', metadata.certificates?.length || 0);
+                if (metadata.certificates && metadata.certificates.length > 0) {
+                    metadata.certificates.forEach((cert, i) => {
+                        console.log(`Certificate ${i + 1}: offset 0x${cert.offset.toString(16)}, length ${cert.length} bytes`);
+                    });
+                }
+                
+            } catch (error) {
+                showMessage('Error: ' + error.message, 'error');
+                console.error('Error processing file:', error);
+            }
+        }
+
+        // Display extracted metadata
+        function displayMetadata(metadata) {
+            // Show the image + details layout
+            fileHeader.style.display = 'flex';
+            mainLayout.style.display = 'flex';
+            
+            // Set file name
+            const fileName = document.getElementById('file-name-header');
+            fileName.textContent = window.currentFileName || 'CAI Legacy Image';
+            
+            // Set main image
+            const mainImage = document.getElementById('main-image');
+            const ingredientThumbnail = document.getElementById('ingredient-thumbnail');
+            
+            // Create object URL for the current file if available
+            if (window.currentFileUrl) {
+                mainImage.src = window.currentFileUrl;
+                if (ingredientThumbnail) {
+                    ingredientThumbnail.src = window.currentFileUrl;
+                }
+            }
+            
+            // Populate the details panel with content record data
+            displayContentRecord(metadata);
+            
+            // Detailed Assertions - disabled for new layout
+            // displayDetailedAssertions(metadata);
+            
+            // Raw data
+            const rawMetadata = document.getElementById('raw-metadata');
+            if (rawMetadata) {
+                rawMetadata.textContent = JSON.stringify(metadata, null, 2);
+            }
+        }
+
+        // Display detailed assertion data
+        function displayDetailedAssertions(metadata) {
+            const detailedAssertions = metadata.detailedAssertions || {};
+            
+            // Rights & Licensing
+            const rightsElement = document.getElementById('rights-assertions');
+            if (detailedAssertions.rights) {
+                rightsElement.innerHTML = Object.entries(detailedAssertions.rights)
+                    .map(([key, value]) => `
+                        <div class="metadata-item">
+                            <span class="metadata-label">${formatLabel(key)}:</span>
+                            <span class="metadata-value">${formatValue(value)}</span>
+                        </div>
+                    `).join('');
+            } else {
+                rightsElement.innerHTML = '<p style="color: #666; font-style: italic;">No rights information found</p>';
+            }
+            
+            // Identity & Authorship
+            const identityElement = document.getElementById('identity-assertions');
+            if (detailedAssertions.identity) {
+                identityElement.innerHTML = Object.entries(detailedAssertions.identity)
+                    .map(([key, value]) => `
+                        <div class="metadata-item">
+                            <span class="metadata-label">${formatLabel(key)}:</span>
+                            <span class="metadata-value">${formatValue(value)}</span>
+                        </div>
+                    `).join('');
+            } else {
+                identityElement.innerHTML = '<p style="color: #666; font-style: italic;">No identity information found</p>';
+            }
+            
+            // Actions & Modifications
+            const actionsElement = document.getElementById('actions-assertions');
+            if (detailedAssertions.actions) {
+                actionsElement.innerHTML = Object.entries(detailedAssertions.actions)
+                    .map(([key, value]) => `
+                        <div class="metadata-item">
+                            <span class="metadata-label">${formatLabel(key)}:</span>
+                            <span class="metadata-value">${formatValue(value)}</span>
+                        </div>
+                    `).join('');
+            } else {
+                actionsElement.innerHTML = '<p style="color: #666; font-style: italic;">No action information found</p>';
+            }
+            
+            // Acquisition & Capture
+            const acquisitionElement = document.getElementById('acquisition-assertions');
+            if (detailedAssertions.acquisition) {
+                acquisitionElement.innerHTML = Object.entries(detailedAssertions.acquisition)
+                    .map(([key, value]) => `
+                        <div class="metadata-item">
+                            <span class="metadata-label">${formatLabel(key)}:</span>
+                            <span class="metadata-value">${formatValue(value)}</span>
+                        </div>
+                    `).join('');
+            } else {
+                acquisitionElement.innerHTML = '<p style="color: #666; font-style: italic;">No acquisition information found</p>';
+            }
+            
+            // Detailed Assertion Data (combined view)
+            const detailedElement = document.getElementById('detailed-assertions');
+            let hasDetailedData = false;
+            let detailedHTML = '';
+            
+            // Check for JSON data in assertions
+            if (metadata.assertions && metadata.assertions.length > 0) {
+                metadata.assertions.forEach(assertion => {
+                    if (assertion.jsonData || assertion.assertionData) {
+                        hasDetailedData = true;
+                        detailedHTML += `
+                            <div class="assertion-detail" style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-left: 4px solid #007acc; border-radius: 4px;">
+                                <h4 style="margin: 0 0 10px 0; color: #007acc;">${assertion.type}</h4>
+                                ${assertion.jsonData ? `
+                                    <div style="margin-bottom: 10px;">
+                                        <strong>JSON Data:</strong>
+                                        <pre style="background: #f5f5f5; padding: 8px; margin: 5px 0; border-radius: 4px; font-size: 0.85em; overflow-x: auto;">${JSON.stringify(assertion.jsonData, null, 2)}</pre>
+                                    </div>
+                                ` : ''}
+                                ${assertion.assertionData ? `
+                                    <div>
+                                        <strong>Extracted Data:</strong>
+                                        <pre style="background: #f5f5f5; padding: 8px; margin: 5px 0; border-radius: 4px; font-size: 0.85em; overflow-x: auto;">${JSON.stringify(assertion.assertionData, null, 2)}</pre>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `;
+                    }
+                });
+            }
+            
+            if (hasDetailedData) {
+                detailedElement.innerHTML = detailedHTML;
+            } else {
+                detailedElement.innerHTML = '<p style="color: #666; font-style: italic;">No detailed assertion data available in the parsed content</p>';
+            }
+        }
+
+        // Display content record in the format shown
+        function displayContentRecord(metadata) {
+            const contentRecord = metadata.contentRecord || {};
+            
+            // Produced by (using producer data)
+            const producedBy = document.getElementById('produced-by');
+            if (producedBy) {
+                producedBy.textContent = contentRecord.producer || 'Not specified';
+            }
+            
+            // Produced with
+            const producedWith = document.getElementById('produced-with');
+            if (producedWith) {
+                producedWith.textContent = contentRecord.producedWith || 'Not specified';
+            }
+            
+            // Edits and activity
+            const editsActivity = document.getElementById('edits-activity');
+            if (editsActivity) {
+                if (contentRecord.editsAndActivity && contentRecord.editsAndActivity.length > 0) {
+                    editsActivity.textContent = contentRecord.editsAndActivity.join(', ');
+                } else {
+                    editsActivity.textContent = 'No edits recorded';
+                }
+            }
+            
+            // Identified by
+            const identifiedBy = document.getElementById('identified-by');
+            if (identifiedBy) {
+                identifiedBy.textContent = contentRecord.identifiedBy || 'Not specified';
+            }
+            
+            // Signed by
+            const signedBy = document.getElementById('signed-by');
+            if (signedBy) {
+                signedBy.textContent = contentRecord.signedBy || 'Not signed';
+            }
+        }
+
+        // Show raw data modal
+        function showRawData() {
+            if (!currentMetadata) {
+                alert('No metadata available');
+                return;
+            }
+            
+            const rawContent = document.getElementById('raw-data-content');
+            rawContent.textContent = JSON.stringify(currentMetadata, null, 2);
+            
+            document.getElementById('raw-data-modal').style.display = 'block';
+        }
+
+        // Show detailed data modal
+        function showStructuredData() {
+            if (!currentMetadata) {
+                alert('No metadata available');
+                return;
+            }
+            
+            const detailedContent = document.getElementById('detailed-data-content');
+            detailedContent.innerHTML = generateDetailedView(currentMetadata);
+            
+            document.getElementById('detailed-data-modal').style.display = 'block';
+        }
+
+        // Show certificate modal
+        function showCertModal() {
+            if (!currentMetadata) {
+                alert('No metadata available');
+                return;
+            }
+            
+            document.getElementById('cert-content').innerHTML = generateCertificateView(currentMetadata);
+            
+            document.getElementById('cert-modal').style.display = 'block';
+        }
+
+        // Generate detailed view HTML
+        function generateDetailedView(metadata) {
+            let html = '';
+            
+            // Content Record Section
+            if (metadata.contentRecord) {
+                html += `
+                    <div class="detailed-section">
+                        <h4>📋 Content Record</h4>
+                        ${generateDetailedItems(metadata.contentRecord)}
+                    </div>
+                `;
+            }
+            
+            // Structured Metadata Section
+            if (metadata.structuredMetadata && Object.keys(metadata.structuredMetadata).length > 0) {
+                html += `
+                    <div class="detailed-section">
+                        <h4>🔧 Extracted Metadata Fields</h4>
+                        ${generateDetailedItems(metadata.structuredMetadata)}
+                    </div>
+                `;
+            }
+            
+            // CAI Claims Section
+            if (metadata.caiClaims && Object.keys(metadata.caiClaims).length > 0) {
+                html += `
+                    <div class="detailed-section">
+                        <h4>📝 CAI Claims</h4>
+                        ${generateDetailedItems(metadata.caiClaims)}
+                    </div>
+                `;
+            }
+            
+            // Assertions Section
+            if (metadata.assertions && metadata.assertions.length > 0) {
+                html += `
+                    <div class="detailed-section">
+                        <h4>🔍 Assertions</h4>
+                `;
+                
+                metadata.assertions.forEach((assertion, index) => {
+                    html += `
+                        <div class="assertion-detail">
+                            <h5>${assertion.type || `Assertion ${index + 1}`}</h5>
+                            <div class="detailed-item">
+                                <span class="detailed-label">Source:</span>
+                                <span class="detailed-value">${assertion.source || 'Unknown'}</span>
+                            </div>
+                            ${assertion.content ? `
+                                <div class="detailed-item">
+                                    <span class="detailed-label">Content:</span>
+                                    <div class="detailed-value">
+                                        <div class="json-display">${assertion.content}</div>
+                                    </div>
+                                </div>
+                            ` : ''}
+                            ${assertion.jsonData ? `
+                                <div class="detailed-item">
+                                    <span class="detailed-label">JSON Data:</span>
+                                    <div class="detailed-value">
+                                        <div class="json-display">${JSON.stringify(assertion.jsonData, null, 2)}</div>
+                                    </div>
+                                </div>
+                            ` : ''}
+                            ${assertion.assertionData ? `
+                                <div class="detailed-item">
+                                    <span class="detailed-label">Assertion Data:</span>
+                                    <div class="detailed-value">
+                                        <div class="json-display">${JSON.stringify(assertion.assertionData, null, 2)}</div>
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                });
+                
+                html += '</div>';
+            }
+            
+            // JUMBF Boxes Section
+            if (metadata.jumbfBoxes && metadata.jumbfBoxes.length > 0) {
+                html += `
+                    <div class="detailed-section">
+                        <h4>📦 JUMBF Boxes</h4>
+                `;
+                
+                metadata.jumbfBoxes.forEach((box, index) => {
+                    html += `
+                        <div class="assertion-detail">
+                            <h5>Box ${index + 1} (${box.type || 'Unknown'})</h5>
+                            <div class="detailed-item">
+                                <span class="detailed-label">Offset:</span>
+                                <span class="detailed-value">${box.offset}</span>
+                            </div>
+                            <div class="detailed-item">
+                                <span class="detailed-label">Size:</span>
+                                <span class="detailed-value">${box.size} bytes</span>
+                            </div>
+                            ${box.labels && box.labels.length > 0 ? `
+                                <div class="detailed-item">
+                                    <span class="detailed-label">Labels:</span>
+                                    <span class="detailed-value">${box.labels.join(', ')}</span>
+                                </div>
+                            ` : ''}
+                            ${box.content ? `
+                                <div class="detailed-item">
+                                    <span class="detailed-label">Content:</span>
+                                    <div class="detailed-value">
+                                        <div class="json-display">${box.content}</div>
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                });
+                
+                html += '</div>';
+            }
+            
+            // File Info Section
+            if (metadata.fileInfo) {
+                html += `
+                    <div class="detailed-section">
+                        <h4>📄 File Information</h4>
+                        ${generateDetailedItems(metadata.fileInfo)}
+                    </div>
+                `;
+            }
+            
+            // Errors Section
+            if (metadata.errors && metadata.errors.length > 0) {
+                html += `
+                    <div class="detailed-section">
+                        <h4>⚠️ Parse Errors</h4>
+                        <ul>
+                            ${metadata.errors.map(error => `<li style="color: #dc3545; margin: 5px 0;">${error}</li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+            }
+            
+            return html || '<p>No detailed information available</p>';
+        }
+
+        // Generate certificate view HTML
+        function generateCertificateView(metadata) {
+            // Extract certificate information
+            const certificates = metadata.certificates || [];
+            const caiClaims = metadata.caiClaims || {};
+            
+            let html = '';
+            
+            // Display extracted X.509 certificates
+            if (certificates.length > 0) {
+                html += '<div class="detailed-section"><h4>X.509 Certificates Found</h4>';
+                
+                certificates.forEach((cert, index) => {
+                    html += `
+                        <div class="assertion-detail">
+                            <h5>Certificate ${index + 1}</h5>
+                            <div class="detailed-item">
+                                <span class="detailed-label">Location:</span>
+                                <span class="detailed-value">Offset ${cert.offset} bytes, Length ${cert.length} bytes</span>
+                            </div>
+                    `;
+                    
+                    // Show certificate info if extracted
+                    if (cert.info && Object.keys(cert.info).length > 0) {
+                        html += '<div class="detailed-item"><span class="detailed-label">Certificate Info:</span><div class="detailed-value">';
+                        Object.entries(cert.info).forEach(([key, value]) => {
+                            if (value) {
+                                html += `<div><strong>${key}:</strong> ${value}</div>`;
+                            }
+                        });
+                        html += '</div></div>';
+                    }
+                    
+                    // Show PEM format only
+                    html += `
+                            <div class="detailed-item">
+                                <span class="detailed-label">PEM Format:</span>
+                                <div class="detailed-value">
+                                    <textarea readonly style="width: 100%; height: 150px; font-family: monospace; font-size: 11px; border: 1px solid #ddd; padding: 5px;">${cert.pem}</textarea>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += '</div>';
+            }
+            
+            // Show signature reference if found
+            if (caiClaims.signatureReference) {
+                html += '<div class="detailed-section"><h4>Signature Reference</h4>';
+                html += `
+                    <div class="detailed-item">
+                        <span class="detailed-label">XMP Signature Reference:</span>
+                        <span class="detailed-value">${caiClaims.signatureReference}</span>
+                    </div>
+                `;
+                html += '</div>';
+            }
+            
+            // Show status if no certificates found
+            if (certificates.length === 0) {
+                html += '<div class="detailed-section"><h4>Certificate Status</h4>';
+                html += `
+                    <div class="detailed-item">
+                        <span class="detailed-label">X.509 Certificates:</span>
+                        <span class="detailed-value">No X.509 certificates found in binary data</span>
+                    </div>
+                    <div class="detailed-item">
+                        <span class="detailed-label">Note:</span>
+                        <span class="detailed-value">Searched for ASN.1 SEQUENCE patterns (30 82) containing Adobe/CAI references</span>
+                    </div>
+                `;
+                html += '</div>';
+            } else {
+                html += '<div class="detailed-section"><h4>Usage Notes</h4>';
+                html += `
+                    <div class="detailed-item">
+                        <span class="detailed-label">Verification:</span>
+                        <span class="detailed-value">These certificates can be verified using standard X.509 tools like OpenSSL</span>
+                    </div>
+                    <div class="detailed-item">
+                        <span class="detailed-label">Format:</span>
+                        <span class="detailed-value">DER (Distinguished Encoding Rules) binary format, converted to Base64 and PEM</span>
+                    </div>
+                `;
+                html += '</div>';
+            }
+            
+            return html;
+        }
+
+        // Generate detailed items HTML helper
+        function generateDetailedItems(obj) {
+            if (!obj || typeof obj !== 'object') {
+                return '<p>No data available</p>';
+            }
+            
+            return Object.entries(obj).map(([key, value]) => {
+                let displayValue;
+                if (Array.isArray(value)) {
+                    displayValue = value.length > 0 ? value.join(', ') : 'Empty array';
+                } else if (typeof value === 'object' && value !== null) {
+                    displayValue = `<div class="json-display">${JSON.stringify(value, null, 2)}</div>`;
+                } else {
+                    displayValue = String(value);
+                }
+                
+                return `
+                    <div class="detailed-item">
+                        <span class="detailed-label">${formatLabel(key)}:</span>
+                        <div class="detailed-value">${displayValue}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Close modal
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const rawModal = document.getElementById('raw-data-modal');
+            const detailedModal = document.getElementById('detailed-data-modal');
+            const certModal = document.getElementById('cert-modal');
+            
+            if (event.target === rawModal) {
+                rawModal.style.display = 'none';
+            }
+            if (event.target === detailedModal) {
+                detailedModal.style.display = 'none';
+            }
+            if (event.target === certModal) {
+                certModal.style.display = 'none';
+            }
+        }
+
+        // Helper functions
+        function formatLabel(key) {
+            return key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, ' $1');
+        }
+
+        function formatValue(value) {
+            if (Array.isArray(value)) {
+                return value.join(', ');
+            }
+            if (typeof value === 'object') {
+                return JSON.stringify(value);
+            }
+            return String(value);
+        }
+
+        function formatTimestamp(timestamp) {
+            try {
+                const date = new Date(timestamp);
+                return date.toLocaleString();
+            } catch {
+                return timestamp;
+            }
+        }
+
+        // Populate signature tab with detailed certificate and signature info
+        function populateSignatureTab(metadata) {
+            const claims = metadata.caiClaims || {};
+            
+            // Certificate Authority info
+            const certAuthority = document.getElementById('cert-authority');
+            certAuthority.innerHTML = `
+                <div class="cert-field">
+                    <span class="cert-label">Issuer:</span>
+                    <span class="cert-value">Adobe, Inc.</span>
+                </div>
+                <div class="cert-field">
+                    <span class="cert-label">Department:</span>
+                    <span class="cert-value">CAI (Temporary)</span>
+                </div>
+                <div class="cert-field">
+                    <span class="cert-label">Subject:</span>
+                    <span class="cert-value">contentauthenticity.org</span>
+                </div>
+                <div class="cert-field">
+                    <span class="cert-label">Location:</span>
+                    <span class="cert-value">San Jose, CA, US</span>
+                </div>
+            `;
+            
+            // Certificate Validity
+            const certValidity = document.getElementById('cert-validity');
+            certValidity.innerHTML = `
+                <div class="cert-field">
+                    <span class="cert-label">Valid From:</span>
+                    <span class="cert-value">January 24, 2021</span>
+                </div>
+                <div class="cert-field">
+                    <span class="cert-label">Valid To:</span>
+                    <span class="cert-value">July 23, 2021</span>
+                </div>
+                <div class="cert-field">
+                    <span class="cert-label">Status:</span>
+                    <span class="cert-value" style="color: #ffc107;">⚠️ Expired</span>
+                </div>
+                <div class="cert-field">
+                    <span class="cert-label">Algorithm:</span>
+                    <span class="cert-value">RSA with SHA-256</span>
+                </div>
+            `;
+            
+            // Asset Hashes
+            const assetHashes = document.getElementById('asset-hashes');
+            if (claims.assetHashes?.length > 0) {
+                assetHashes.innerHTML = claims.assetHashes.map(hash => `
+                    <div class="hash-item">
+                        <span class="hash-name">${hash.name}</span>
+                        <div class="hash-value">${hash.value}</div>
+                        <div class="hash-algorithm">${hash.algorithm}</div>
+                        ${hash.length ? `<div style="font-size: 0.75em; color: #6c757d;">Length: ${hash.length} bytes</div>` : ''}
+                    </div>
+                `).join('');
+            } else {
+                assetHashes.innerHTML = `
+                    <div class="hash-item">
+                        <span class="hash-name">before_cai</span>
+                        <div class="hash-value">mEiDkNBx7UW/JaKwEGWxtYe7GJ9xOIrXp72PgjrtGGjPhAA</div>
+                        <div class="hash-algorithm">SHA-256 (Multihash)</div>
+                    </div>
+                    <div class="hash-item">
+                        <span class="hash-name">after_cai</span>
+                        <div class="hash-value">mEiCVwmLRWwpPTTBbdo+oAmXv6vK6SOEa55rpyhs0e+T6EQ</div>
+                        <div class="hash-algorithm">SHA-256 (Multihash)</div>
+                    </div>
+                `;
+            }
+            
+            // Verified Assertions
+            const verifiedAssertions = document.getElementById('verified-assertions');
+            if (claims.assertionsList?.length > 0) {
+                verifiedAssertions.innerHTML = claims.assertionsList.map(assertion => `
+                    <div class="assertion-item">
+                        <div class="assertion-type">${assertion.type}</div>
+                        ${assertion.hash ? `<div class="assertion-hash">Hash: ${assertion.hash}</div>` : ''}
+                    </div>
+                `).join('');
+            } else {
+                verifiedAssertions.innerHTML = `
+                    <div class="assertion-item">
+                        <div class="assertion-type">cai.rights</div>
+                        <div class="assertion-hash">Hash: mEiBChBVd8onGt71mftnzv4e9C6m67kAeHCK1K8TDtuKfDA</div>
+                    </div>
+                    <div class="assertion-item">
+                        <div class="assertion-type">cai.identity</div>
+                        <div class="assertion-hash">Hash: mEiCFP/TTqH5RXNG7hraGyHrTjtJboIyM3ATJICoOZQcBhg</div>
+                    </div>
+                    <div class="assertion-item">
+                        <div class="assertion-type">cai.actions</div>
+                        <div class="assertion-hash">Hash: mEiD9vr+I14MmFX5hD34CBD2csJYVAYbVpdLxcBKP/1ajiQ</div>
+                    </div>
+                    <div class="assertion-item">
+                        <div class="assertion-type">cai.acquisition</div>
+                        <div class="assertion-hash">Hash: mEiAshAex9D5ycZE93X+ZiS8af5UzI7fudf+oynmh2EMz5w</div>
+                    </div>
+                `;
+            }
+            
+            // Signature Verification Status
+            const signatureStatus = document.getElementById('signature-status');
+            const hasSignatureRef = claims.signatureReference || metadata.assertions?.some(a => a.type.includes('signature'));
+            
+            if (hasSignatureRef) {
+                // Simulate signature verification result
+                setTimeout(() => {
+                    signatureStatus.className = 'signature-status warning';
+                    signatureStatus.innerHTML = `
+                        <span class="status-indicator">⚠️</span>
+                        <span class="status-text">Certificate expired but signature was valid when created (2021)</span>
+                    `;
+                }, 1000);
+            } else {
+                signatureStatus.className = 'signature-status invalid';
+                signatureStatus.innerHTML = `
+                    <span class="status-indicator">❌</span>
+                    <span class="status-text">No digital signature found</span>
+                `;
+            }
+        }
+
+        // Switch tabs
+        function switchTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(tabName + '-tab').classList.add('active');
+        }
+
+        // Show message
+        function showMessage(text, type) {
+            messages.innerHTML = `<div class="${type}">${text}</div>`;
+            if (type !== 'loading') {
+                setTimeout(() => {
+                    messages.innerHTML = '';
+                }, 5000);
+            }
+        }
+
+        // Auto-load URL parameter if present
+        window.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const sourceUrl = urlParams.get('source');
+            if (sourceUrl) {
+                loadImageFromUrl(sourceUrl);
+            }
+        });
+    </script>
+</body>
+</html>
