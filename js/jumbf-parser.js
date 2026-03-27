@@ -1,561 +1,823 @@
 /**
- * JUMBF (JPEG Universal Metadata Box Format) Parser for CAI Legacy Data
- * Handles the 2020-2021 era CAI data format embedded in JPEG images
+ * JPEG/APP1/APP11 parser for the early CAI pre-alpha format.
+ * Everything surfaced by this parser is derived from bytes in the JPEG.
  */
 
 class JUMBFParser {
     constructor() {
-        this.textDecoder = new TextDecoder('utf-8', {fatal: false});
+        this.textDecoder = new TextDecoder('utf-8', { fatal: false });
+        this.attributeOidMap = {
+            '2.5.4.3': 'CN',
+            '2.5.4.4': 'SN',
+            '2.5.4.5': 'serialNumber',
+            '2.5.4.6': 'C',
+            '2.5.4.7': 'L',
+            '2.5.4.8': 'ST',
+            '2.5.4.9': 'street',
+            '2.5.4.10': 'O',
+            '2.5.4.11': 'OU',
+            '2.5.4.12': 'title',
+            '2.5.4.42': 'GN',
+            '1.2.840.113549.1.9.1': 'emailAddress'
+        };
+        this.algorithmOidMap = {
+            '1.2.840.113549.1.1.5': 'sha1WithRSAEncryption',
+            '1.2.840.113549.1.1.11': 'sha256WithRSAEncryption',
+            '1.2.840.113549.1.1.12': 'sha384WithRSAEncryption',
+            '1.2.840.113549.1.1.13': 'sha512WithRSAEncryption',
+            '1.2.840.10045.4.3.2': 'ecdsaWithSHA256',
+            '1.2.840.10045.4.3.3': 'ecdsaWithSHA384',
+            '1.2.840.10045.4.3.4': 'ecdsaWithSHA512'
+        };
     }
 
-    /**
-     * Parse JPEG image for CAI/JUMBF data
-     */
     async parseImage(arrayBuffer) {
-        const uint8Array = new Uint8Array(arrayBuffer);
+        const bytes = new Uint8Array(arrayBuffer);
         const result = {
             fileInfo: this.getFileInfo(arrayBuffer),
+            jpegSegments: [],
             jumbfBoxes: [],
             xmpData: null,
             exifData: null,
             caiClaims: {},
             assertions: [],
             errors: [],
-            contentRecord: {
-                producer: null,
-                producedWith: null,
-                editsAndActivity: [],
-                contentElements: [],
-                providers: [],
-                identifiedBy: null,
-                signedBy: null
-            },
-            structuredMetadata: {}
+            certificates: [],
+            contentRecord: this.createEmptyContentRecord(),
+            structuredMetadata: {},
+            detailedAssertions: {
+                rights: null,
+                identity: null,
+                actions: null,
+                acquisition: null
+            }
         };
 
+        if (!result.fileInfo.isJPEG) {
+            result.errors.push('File is not a JPEG image.');
+            return result;
+        }
+
         try {
-            // Parse JPEG segments
-            let offset = 2; // Skip initial 0xFFD8
-
-            while (offset < uint8Array.length - 4) {
-                if (uint8Array[offset] !== 0xFF) {
-                    offset++;
-                    continue;
-                }
-
-                const marker = uint8Array[offset + 1];
-                
-                if (marker === 0x00 || marker === 0xFF) {
-                    offset++;
-                    continue;
-                }
-
-                const segmentLength = (uint8Array[offset + 2] << 8) | uint8Array[offset + 3];
-                const segmentData = uint8Array.slice(offset + 4, offset + 2 + segmentLength);
-
-                // Parse different segment types
-                switch (marker) {
-                    case 0xE1: // APP1 - EXIF/XMP
-                        this.parseAPP1Segment(segmentData, result);
-                        break;
-                    case 0xEB: // APP11 - JUMBF
-                        this.parseAPP11Segment(segmentData, result);
-                        break;
-                }
-
-                offset += 2 + segmentLength;
-            }
-
-            // Process found data
+            this.parseJPEGSegments(bytes, result);
+            result.certificates = this.extractCertificates(bytes);
             this.processCAIData(result);
-            
-            // Extract X.509 certificates from the binary data
-            console.log('About to call extractX509Certificates...');
-            try {
-                const uint8Data = new Uint8Array(arrayBuffer);
-                result.certificates = this.extractX509Certificates(uint8Data);
-                console.log('Certificate extraction completed, found:', result.certificates?.length || 0);
-            } catch (certError) {
-                console.error('Certificate extraction error:', certError);
-                result.certificates = [];
-            }
-
         } catch (error) {
-            result.errors.push('Parse error: ' + error.message);
+            result.errors.push(`Parse error: ${error.message}`);
         }
 
         return result;
     }
 
-    /**
-     * Get basic file information
-     */
+    createEmptyContentRecord() {
+        return {
+            producer: null,
+            producedWith: null,
+            editsAndActivity: [],
+            contentElements: [],
+            providers: [],
+            identifiedBy: null,
+            signedBy: null
+        };
+    }
+
     getFileInfo(arrayBuffer) {
-        const uint8Array = new Uint8Array(arrayBuffer);
+        const bytes = new Uint8Array(arrayBuffer);
         return {
             size: arrayBuffer.byteLength,
-            isJPEG: uint8Array[0] === 0xFF && uint8Array[1] === 0xD8,
+            isJPEG: bytes[0] === 0xFF && bytes[1] === 0xD8,
             parsedAt: new Date().toISOString()
         };
     }
 
-    /**
-     * Parse APP1 segment (EXIF/XMP data)
-     */
+    parseJPEGSegments(bytes, result) {
+        let offset = 2;
+
+        while (offset < bytes.length - 1) {
+            if (bytes[offset] !== 0xFF) {
+                offset += 1;
+                continue;
+            }
+
+            while (offset < bytes.length && bytes[offset] === 0xFF) {
+                offset += 1;
+            }
+            if (offset >= bytes.length) {
+                break;
+            }
+
+            const marker = bytes[offset];
+            offset += 1;
+
+            if (marker === 0xD9 || marker === 0xDA) {
+                break;
+            }
+
+            if (this.isStandaloneMarker(marker)) {
+                continue;
+            }
+
+            if (offset + 1 >= bytes.length) {
+                break;
+            }
+
+            const segmentLength = (bytes[offset] << 8) | bytes[offset + 1];
+            if (segmentLength < 2 || offset + segmentLength > bytes.length) {
+                result.errors.push(`Invalid JPEG segment length near byte ${offset - 1}.`);
+                break;
+            }
+
+            const dataStart = offset + 2;
+            const dataEnd = offset + segmentLength;
+            const segmentData = bytes.slice(dataStart, dataEnd);
+            const markerOffset = offset - 1;
+
+            result.jpegSegments.push({
+                marker,
+                offset: markerOffset,
+                length: segmentLength
+            });
+
+            if (marker === 0xE1) {
+                this.parseAPP1Segment(segmentData, result);
+            } else if (marker === 0xEB) {
+                this.parseAPP11Segment(segmentData, markerOffset, result);
+            }
+
+            offset = dataEnd;
+        }
+    }
+
+    isStandaloneMarker(marker) {
+        return (marker >= 0xD0 && marker <= 0xD7) || marker === 0x01;
+    }
+
     parseAPP1Segment(data, result) {
         try {
-            // Check for XMP
             if (this.isXMPData(data)) {
                 const xmpString = this.extractXMPString(data);
                 result.xmpData = {
                     raw: xmpString,
                     size: data.length
                 };
-                
-                // Extract CAI-specific XMP data
                 this.extractCAIFromXMP(xmpString, result);
-                
-                // Also try to extract structured metadata from the binary data
-                this.extractStructuredMetadata(data, result);
-            }
-            
-            // Check for EXIF
-            else if (this.isEXIFData(data)) {
-                result.exifData = {
-                    found: true,
-                    size: data.length
-                };
-                
-                // Try to extract EXIF metadata
-                this.extractEXIFMetadata(data, result);
+            } else if (this.isEXIFData(data)) {
+                result.exifData = this.parseEXIFData(data);
+                this.mergeEXIFIntoContentRecord(result.exifData, result);
             }
         } catch (error) {
-            result.errors.push('APP1 parse error: ' + error.message);
+            result.errors.push(`APP1 parse error: ${error.message}`);
         }
     }
 
-    /**
-     * Extract structured metadata from binary XMP data
-     */
-    extractStructuredMetadata(data, result) {
+    parseAPP11Segment(data, segmentOffset, result) {
         try {
-            // Convert binary data to text for pattern matching
-            const textData = this.textDecoder.decode(data);
-            
-            console.log('Binary data sample (first 500 chars):', textData.substring(0, 500));
-            console.log('Binary data includes Copyright?', textData.includes('Copyright'));
-            console.log('Binary data includes Starling Labs?', textData.includes('Starling Labs'));
-            console.log('Binary data includes Photoshop?', textData.includes('Photoshop'));
-            
-            // Look for key CAI fields in the binary data with more flexible patterns
-            const fields = {
-                'Copyright': [
-                    /Copyright[:\x00\s]*([^\x00\n\r\u0001-\u001F]{3,50})/gi,
-                    /Copyright.*?([A-Za-z][A-Za-z0-9\s]{2,30})/gi
-                ],
-                'StEvt_softwareAgent': [
-                    /StEvt_softwareAgent[:\x00\s]*([^\x00\n\r\u0001-\u001F]{3,20})/gi,
-                    /softwareAgent.*?([A-Za-z][A-Za-z0-9\s]{2,20})/gi
-                ],
-                'StEvt_action': [
-                    /StEvt_action[:\x00\s]*([^\x00\n\r\u0001-\u001F]{3,20})/gi,
-                    /action.*?(cai\.[a-z]+)/gi
-                ],
-                'StEvt_parameters': [
-                    /StEvt_parameters[:\x00\s]*([^\x00\n\r\u0001-\u001F]{3,20})/gi,
-                    /parameters.*?([A-Za-z][A-Za-z0-9\s]{2,20})/gi
-                ],
-                'Recorder': [
-                    /Recorder[:\x00\s]*([^\x00\n\r\u0001-\u001F]{3,20})/gi,
-                    /Recorder.*?([A-Za-z][A-Za-z0-9\s]{2,20})/gi
-                ]
-            };
+            const segmentText = this.sanitizeText(this.textDecoder.decode(data));
+            const boxes = this.extractBoxesFromSegment(data, segmentText, segmentOffset);
+            result.jumbfBoxes.push(...boxes);
+        } catch (error) {
+            result.errors.push(`APP11 parse error: ${error.message}`);
+        }
+    }
 
-            result.structuredMetadata = {};
-            
-            // Try multiple patterns for each field
-            for (const [fieldName, patterns] of Object.entries(fields)) {
-                for (const pattern of patterns) {
-                    const matches = [...textData.matchAll(pattern)];
-                    console.log(`Looking for ${fieldName} with pattern ${pattern}, found ${matches.length} matches`);
-                    
-                    if (matches.length > 0) {
-                        for (const match of matches) {
-                            let value = match[1].trim().replace(/[\x00-\x1F\x7F-\x9F]/g, '');
-                            if (value.length > 2) {
-                                console.log(`Found ${fieldName}: "${value}"`);
-                                result.structuredMetadata[fieldName] = value;
-                                break;
+    isXMPData(data) {
+        const probe = this.textDecoder.decode(data.slice(0, 64));
+        return probe.includes('http://ns.adobe.com/xap/1.0/') || probe.includes('<?xpacket');
+    }
+
+    isEXIFData(data) {
+        return data.length >= 6 &&
+            data[0] === 0x45 && data[1] === 0x78 &&
+            data[2] === 0x69 && data[3] === 0x66 &&
+            data[4] === 0x00 && data[5] === 0x00;
+    }
+
+    extractXMPString(data) {
+        const text = this.textDecoder.decode(data);
+        const start = text.indexOf('<?xpacket');
+        const end = text.lastIndexOf('<?xpacket end=');
+
+        if (start >= 0 && end >= start) {
+            const closing = text.indexOf('?>', end);
+            return text.slice(start, closing >= 0 ? closing + 2 : text.length);
+        }
+
+        return text;
+    }
+
+    extractCAIFromXMP(xmpString, result) {
+        const values = {};
+
+        if (typeof DOMParser !== 'undefined') {
+            try {
+                const xml = new DOMParser().parseFromString(xmpString, 'application/xml');
+                if (!xml.querySelector('parsererror')) {
+                    const descriptions = Array.from(xml.getElementsByTagNameNS('*', 'Description'));
+                    descriptions.forEach((description) => {
+                        for (const attribute of Array.from(description.attributes)) {
+                            const key = attribute.localName || attribute.name;
+                            if (attribute.value && attribute.value.trim()) {
+                                values[key] = attribute.value.trim();
                             }
                         }
-                        if (result.structuredMetadata[fieldName]) break;
-                    }
+                    });
+                }
+            } catch (error) {
+                result.errors.push(`XMP XML parse error: ${error.message}`);
+            }
+        }
+
+        if (Object.keys(values).length === 0) {
+            const attributePattern = /([A-Za-z_][\w.-]*):([A-Za-z_][\w.-]*)="([^"]+)"/g;
+            let match;
+            while ((match = attributePattern.exec(xmpString)) !== null) {
+                values[match[2]] = match[3];
+            }
+        }
+
+        result.structuredMetadata = {
+            ...result.structuredMetadata,
+            ...values
+        };
+
+        if (values.provenance) {
+            result.caiClaims.provenance = values.provenance;
+        }
+        if (values.title) {
+            result.caiClaims.title = values.title;
+        }
+        if (values.format) {
+            result.caiClaims.format = values.format;
+        }
+    }
+
+    parseEXIFData(data) {
+        const exif = {
+            found: true,
+            size: data.length,
+            tags: {}
+        };
+
+        try {
+            const tiffOffset = 6;
+            if (data.length < tiffOffset + 8) {
+                return exif;
+            }
+
+            const littleEndian = data[tiffOffset] === 0x49 && data[tiffOffset + 1] === 0x49;
+            const bigEndian = data[tiffOffset] === 0x4D && data[tiffOffset + 1] === 0x4D;
+            if (!littleEndian && !bigEndian) {
+                return exif;
+            }
+
+            const byteOrder = littleEndian ? 'LE' : 'BE';
+            const firstIFDOffset = this.readUInt32(data, tiffOffset + 4, byteOrder);
+            this.parseEXIFIFD(data, tiffOffset, tiffOffset + firstIFDOffset, byteOrder, exif.tags, 0);
+        } catch (error) {
+            exif.error = error.message;
+        }
+
+        return exif;
+    }
+
+    parseEXIFIFD(data, tiffOffset, ifdOffset, byteOrder, tags, depth) {
+        if (depth > 4 || ifdOffset <= 0 || ifdOffset + 2 > data.length) {
+            return;
+        }
+
+        const entryCount = this.readUInt16(data, ifdOffset, byteOrder);
+        for (let i = 0; i < entryCount; i += 1) {
+            const entryOffset = ifdOffset + 2 + (i * 12);
+            if (entryOffset + 12 > data.length) {
+                break;
+            }
+
+            const tag = this.readUInt16(data, entryOffset, byteOrder);
+            const type = this.readUInt16(data, entryOffset + 2, byteOrder);
+            const count = this.readUInt32(data, entryOffset + 4, byteOrder);
+            const valueOffset = entryOffset + 8;
+            const value = this.readEXIFValue(data, tiffOffset, type, count, valueOffset, byteOrder);
+
+            const tagName = this.getEXIFTagName(tag);
+            if (tagName && value !== null && value !== '') {
+                tags[tagName] = value;
+            }
+
+            if (tag === 0x8769 || tag === 0x8825) {
+                const nestedOffset = this.readUInt32(data, valueOffset, byteOrder);
+                if (nestedOffset > 0) {
+                    this.parseEXIFIFD(data, tiffOffset, tiffOffset + nestedOffset, byteOrder, tags, depth + 1);
                 }
             }
-
-            console.log('Extracted structured metadata:', result.structuredMetadata);
-
-            // Update content record based on structured metadata
-            if (result.structuredMetadata.Copyright) {
-                result.contentRecord.producer = result.structuredMetadata.Copyright;
-            } else if (result.structuredMetadata.Display) {
-                result.contentRecord.producer = result.structuredMetadata.Display;
-            }
-
-            if (result.structuredMetadata.StEvt_softwareAgent) {
-                result.contentRecord.producedWith = result.structuredMetadata.StEvt_softwareAgent;
-            } else if (result.structuredMetadata.Recorder) {
-                result.contentRecord.producedWith = result.structuredMetadata.Recorder;
-            }
-
-            // Extract activities
-            const activities = [];
-            if (result.structuredMetadata.StEvt_action) {
-                const action = result.structuredMetadata.StEvt_action;
-                if (action.includes('cai.edit') || action.includes('edit')) {
-                    activities.push('Edit');
-                }
-            }
-            if (result.structuredMetadata.StEvt_parameters) {
-                activities.push(result.structuredMetadata.StEvt_parameters);
-            }
-            result.contentRecord.editsAndActivity = activities;
-
-            // Set signing information if we have CAI data
-            if (Object.keys(result.structuredMetadata).length > 0) {
-                result.contentRecord.identifiedBy = 'Adobe';
-                result.contentRecord.signedBy = 'Adobe';
-                result.contentRecord.providers = ['Adobe', 'CAI'];
-            }
-
-        } catch (error) {
-            result.errors.push('Structured metadata extraction error: ' + error.message);
         }
     }
 
-    /**
-     * Extract EXIF metadata
-     */
-    extractEXIFMetadata(data, result) {
+    readEXIFValue(data, tiffOffset, type, count, valueOffset, byteOrder) {
+        const typeSizes = {
+            1: 1,
+            2: 1,
+            3: 2,
+            4: 4,
+            5: 8,
+            7: 1,
+            9: 4,
+            10: 8
+        };
+
+        const size = typeSizes[type];
+        if (!size) {
+            return null;
+        }
+
+        const totalSize = size * count;
+        let dataOffset = valueOffset;
+        if (totalSize > 4) {
+            const pointedOffset = this.readUInt32(data, valueOffset, byteOrder);
+            dataOffset = tiffOffset + pointedOffset;
+        }
+
+        if (dataOffset < 0 || dataOffset + totalSize > data.length) {
+            return null;
+        }
+
+        switch (type) {
+            case 2:
+            case 7:
+                return this.textDecoder.decode(data.slice(dataOffset, dataOffset + totalSize)).replace(/\0+$/, '').trim();
+            case 3:
+                return count === 1 ? this.readUInt16(data, dataOffset, byteOrder) : this.readUIntArray(data, dataOffset, count, 2, byteOrder);
+            case 4:
+                return count === 1 ? this.readUInt32(data, dataOffset, byteOrder) : this.readUIntArray(data, dataOffset, count, 4, byteOrder);
+            default:
+                return null;
+        }
+    }
+
+    mergeEXIFIntoContentRecord(exifData, result) {
+        if (!exifData || !exifData.tags) {
+            return;
+        }
+
+        result.structuredMetadata = {
+            ...result.structuredMetadata,
+            ...exifData.tags
+        };
+
+        if (!result.contentRecord.producedWith && exifData.tags.Software) {
+            result.contentRecord.producedWith = exifData.tags.Software;
+        }
+    }
+
+    getEXIFTagName(tag) {
+        const tagMap = {
+            0x010E: 'ImageDescription',
+            0x010F: 'Make',
+            0x0110: 'Model',
+            0x0131: 'Software',
+            0x0132: 'ModifyDate',
+            0x8298: 'Copyright',
+            0x9003: 'DateTimeOriginal',
+            0x9004: 'CreateDate'
+        };
+
+        return tagMap[tag] || null;
+    }
+
+    extractBoxesFromSegment(segmentBytes, segmentText, segmentOffset) {
+        const labels = [];
+        const labelPattern = /\b(cai\.[A-Za-z0-9._-]+|adobe\.asset\.info)\b/g;
+        let match;
+
+        while ((match = labelPattern.exec(segmentText)) !== null) {
+            labels.push({
+                label: match[1],
+                textIndex: match.index
+            });
+        }
+
+        const boxes = [];
+        let index = 0;
+
+        while (index < labels.length) {
+            const entry = labels[index];
+            const remainingText = segmentText.slice(entry.textIndex);
+            const payload = this.extractJsonPayloadFromText(remainingText, entry.label);
+            const fallbackEnd = index + 1 < labels.length ? labels[index + 1].textIndex : segmentText.length;
+            const payloadEnd = payload ? entry.textIndex + payload.end : fallbackEnd;
+            const boxEnd = Math.max(entry.textIndex + entry.label.length, Math.min(segmentText.length, payloadEnd));
+            const boxText = segmentText.slice(entry.textIndex, boxEnd);
+
+            boxes.push({
+                offset: segmentOffset + entry.textIndex,
+                size: Math.max(1, boxEnd - entry.textIndex),
+                labels: [entry.label],
+                type: 'CAI',
+                jsonData: payload ? [payload.value] : null,
+                assertionData: payload ? payload.value : null,
+                content: boxText.trim().slice(0, 500)
+            });
+
+            index += 1;
+            while (index < labels.length && labels[index].textIndex < boxEnd) {
+                index += 1;
+            }
+        }
+
+        if (boxes.length === 0 && segmentText.includes('JUMB')) {
+            boxes.push({
+                offset: segmentOffset,
+                size: segmentBytes.length,
+                labels: [],
+                type: 'JUMBF',
+                jsonData: null,
+                assertionData: null,
+                content: segmentText.trim().slice(0, 500)
+            });
+        }
+
+        return boxes;
+    }
+
+    extractJsonPayloadFromText(text, label) {
+        const bodyWindow = text.slice(label.length, label.length + 96);
+        const jsonMarker = bodyWindow.indexOf('json');
+        if (jsonMarker < 0) {
+            return null;
+        }
+
+        const leadingText = bodyWindow.slice(0, jsonMarker);
+        if (/\b(cai\.[A-Za-z0-9._-]+|adobe\.asset\.info)\b/.test(leadingText)) {
+            return null;
+        }
+
+        const payloadStart = this.findFirstJsonChar(text, label.length + jsonMarker + 4);
+        if (payloadStart < 0) {
+            return null;
+        }
+
+        const extracted = this.extractBalancedJson(text, payloadStart);
+        if (!extracted) {
+            return null;
+        }
+
         try {
-            // Basic EXIF parsing - look for text strings
-            const textData = this.textDecoder.decode(data);
-            
-            // Look for software information in EXIF
-            const softwareMatch = textData.match(/Software[:\x00\s]+([^\x00\n\r]+)/i);
-            if (softwareMatch && !result.contentRecord.producedWith) {
-                result.contentRecord.producedWith = softwareMatch[1].trim().replace(/[\x00-\x1F\x7F]/g, '');
-            }
-        } catch (error) {
-            // Continue if EXIF extraction fails
-        }
-    }
-
-    /**
-     * Parse APP11 segment (JUMBF data)
-     */
-    parseAPP11Segment(data, result) {
-        try {
-            // Check for JUMBF identifier
-            const identifier = String.fromCharCode(...data.slice(0, 6));
-            if (identifier === 'JUMBF\0' || identifier.includes('JUMB')) {
-                const jumbfData = data.slice(6);
-                const boxes = this.parseJUMBFBoxes(jumbfData);
-                result.jumbfBoxes.push(...boxes);
-            }
-        } catch (error) {
-            result.errors.push('APP11 parse error: ' + error.message);
-        }
-    }
-
-    /**
-     * Check if data contains XMP
-     */
-    isXMPData(data) {
-        const str = this.textDecoder.decode(data.slice(0, 40));
-        return str.includes('http://ns.adobe.com/xap/1.0/') || str.includes('xpacket');
-    }
-
-    /**
-     * Check if data contains EXIF
-     */
-    isEXIFData(data) {
-        return data.length > 6 && 
-               data[0] === 0x45 && data[1] === 0x78 && 
-               data[2] === 0x69 && data[3] === 0x66 &&
-               data[4] === 0x00 && data[5] === 0x00;
-    }
-
-    /**
-     * Extract XMP string from data
-     */
-    extractXMPString(data) {
-        // Find XMP packet start
-        const str = this.textDecoder.decode(data);
-        const startIndex = str.indexOf('<?xpacket');
-        const endIndex = str.indexOf('<?xpacket end=');
-        
-        if (startIndex >= 0 && endIndex >= 0) {
-            return str.substring(startIndex, endIndex + 20);
-        }
-        
-        return str;
-    }
-
-    /**
-     * Extract CAI data from XMP
-     */
-    extractCAIFromXMP(xmpString, result) {
-        try {
-            // Initialize structured content record data
-            result.contentRecord = {
-                producer: null,
-                producedWith: null,
-                editsAndActivity: [],
-                contentElements: [],
-                providers: [],
-                identifiedBy: null,
-                signedBy: null
+            return {
+                raw: extracted.json,
+                value: JSON.parse(extracted.json),
+                end: extracted.end
             };
-
-            // Debug: Log the XMP string to see what we're working with
-            console.log('XMP String sample:', xmpString.substring(0, 500));
-
-            // The XMP data comes in as simple field names, not XML
-            // Extract producer information from Copyright field
-            if (xmpString.includes('Copyright')) {
-                const copyrightMatch = xmpString.match(/Copyright[:\s]+([^\n\r]+)/i);
-                if (copyrightMatch) {
-                    result.contentRecord.producer = copyrightMatch[1].trim();
-                }
-            }
-
-            // Extract software information from StEvt_softwareAgent or Recorder
-            if (xmpString.includes('StEvt_softwareAgent')) {
-                const softwareMatch = xmpString.match(/StEvt_softwareAgent[:\s]+([^\n\r]+)/i);
-                if (softwareMatch) {
-                    result.contentRecord.producedWith = softwareMatch[1].trim();
-                }
-            } else if (xmpString.includes('Recorder')) {
-                const recorderMatch = xmpString.match(/Recorder[:\s]+([^\n\r]+)/i);
-                if (recorderMatch) {
-                    result.contentRecord.producedWith = recorderMatch[1].trim();
-                }
-            }
-
-            // Extract edits and activity (actions)
-            const activities = [];
-            
-            // Check for StEvt_action
-            if (xmpString.includes('StEvt_action')) {
-                const actionMatch = xmpString.match(/StEvt_action[:\s]+([^\n\r]+)/i);
-                if (actionMatch) {
-                    let action = actionMatch[1].trim();
-                    if (action === 'cai.edit') {
-                        activities.push('Edit');
-                    } else if (action.includes('edit')) {
-                        activities.push('Edit');
-                    } else if (action.includes('import')) {
-                        activities.push('Import');
-                    } else if (action.includes('transform')) {
-                        activities.push('Transform');
-                    } else {
-                        activities.push(action);
-                    }
-                }
-            }
-            
-            // Check for parameters to add more detail
-            if (xmpString.includes('StEvt_parameters')) {
-                const paramsMatch = xmpString.match(/StEvt_parameters[:\s]+([^\n\r]+)/i);
-                if (paramsMatch) {
-                    const param = paramsMatch[1].trim();
-                    activities.push(param);
-                }
-            }
-            
-            result.contentRecord.editsAndActivity = activities;
-
-            // Extract content elements/providers from assertions
-            if (xmpString.includes('Assertions')) {
-                const providers = new Set();
-                
-                // Look for provider information in assertions
-                if (xmpString.includes('adobe')) providers.add('Adobe');
-                if (xmpString.includes('cai')) providers.add('CAI');
-                if (xmpString.includes('contentauthenticity')) providers.add('Content Authenticity');
-                
-                result.contentRecord.providers = Array.from(providers);
-            }
-
-            // Extract identification/signing information
-            if (xmpString.includes('Adobe') || xmpString.includes('contentauthenticity.org')) {
-                result.contentRecord.identifiedBy = 'Adobe';
-                result.contentRecord.signedBy = 'Adobe';
-            }
-
-            // Legacy extraction for backward compatibility
-            // Extract provenance
-            const provMatch = xmpString.match(/dcterms:provenance[^>]*>([^<]+)/i);
-            if (provMatch) {
-                result.caiClaims.provenance = provMatch[1];
-            }
-
-            // Extract CAI actions
-            const allActionMatches = xmpString.match(/stEvt:action[^>]*>([^<]+)/gi);
-            if (allActionMatches) {
-                result.caiClaims.actions = allActionMatches.map(match => {
-                    const actionMatch = match.match(/>([^<]+)/);
-                    return actionMatch ? actionMatch[1] : match;
-                });
-            }
-
-            // Extract software agent
-            const softwareMatch = xmpString.match(/stEvt:softwareAgent[^>]*>([^<]+)/i);
-            if (softwareMatch) {
-                result.caiClaims.softwareAgent = softwareMatch[1];
-            }
-
-            // Extract when
-            const whenMatch = xmpString.match(/stEvt:when[^>]*>([^<]+)/i);
-            if (whenMatch) {
-                result.caiClaims.when = whenMatch[1];
-            }
-
-            // Extract parameters
-            const paramsMatch = xmpString.match(/stEvt:parameters[^>]*>([^<]+)/i);
-            if (paramsMatch) {
-                result.caiClaims.parameters = paramsMatch[1];
-            }
-
-            // Look for other CAI-related fields
-            const caiFields = [
-                'copyright', 'creator', 'rights', 'identifier', 'title'
-            ];
-
-            caiFields.forEach(field => {
-                const regex = new RegExp(`dc:${field}[^>]*>([^<]+)`, 'i');
-                const match = xmpString.match(regex);
-                if (match) {
-                    result.caiClaims[field] = match[1];
-                }
-            });
-
-            // Extract signature information
-            const sigMatch = xmpString.match(/Signature[^>]*>([^<]+)/i);
-            if (sigMatch) {
-                result.caiClaims.signatureReference = sigMatch[1];
-            }
-
-            // Extract asset hashes
-            this.extractAssetHashes(xmpString, result);
-
-            // Extract assertions list
-            this.extractAssertionsList(xmpString, result);
-
         } catch (error) {
-            result.errors.push('XMP CAI extraction error: ' + error.message);
+            return null;
         }
     }
 
-    /**
-     * Extract asset hash information
-     */
-    extractAssetHashes(xmpString, result) {
-        try {
-            // Look for asset hash arrays in various formats
-            const hashPatterns = [
-                /Asset_HashesName[^>]*>([^<]+)/gi,
-                /Asset_HashesValue[^>]*>([^<]+)/gi,
-                /Asset_HashesLength[^>]*>([^<]+)/gi,
-                /Asset_HashesStart[^>]*>([^<]+)/gi
-            ];
-
-            const hashData = {};
-            hashPatterns.forEach((pattern, index) => {
-                const matches = [...xmpString.matchAll(pattern)];
-                if (matches.length > 0) {
-                    const key = ['names', 'values', 'lengths', 'starts'][index];
-                    hashData[key] = matches.map(match => match[1].trim());
-                }
-            });
-
-            if (hashData.names && hashData.values) {
-                result.caiClaims.assetHashes = [];
-                
-                hashData.names.forEach((name, index) => {
-                    const value = hashData.values[index];
-                    if (value) {
-                        result.caiClaims.assetHashes.push({
-                            name: name,
-                            value: value,
-                            algorithm: this.detectHashAlgorithm(value),
-                            length: hashData.lengths ? hashData.lengths[index] : null,
-                            start: hashData.starts ? hashData.starts[index] : null
-                        });
-                    }
-                });
+    findFirstJsonChar(text, start) {
+        for (let i = start; i < text.length; i += 1) {
+            if (text[i] === '{' || text[i] === '[') {
+                return i;
             }
-        } catch (error) {
-            // Continue if hash extraction fails
         }
+        return -1;
     }
 
-    /**
-     * Extract assertions list with hashes
-     */
-    extractAssertionsList(xmpString, result) {
-        try {
-            const assertionMatch = xmpString.match(/Assertions[^>]*>([^<]+)/i);
-            if (assertionMatch) {
-                const assertionsString = assertionMatch[1];
-                
-                // Split assertions and extract types and hashes
-                const assertions = assertionsString.split(',').map(assertion => {
-                    const trimmed = assertion.trim();
-                    
-                    // Extract assertion type (e.g., cai.rights, cai.identity)
-                    const typeMatch = trimmed.match(/cai\.([^?]+)/);
-                    const hashMatch = trimmed.match(/hl=([^,\s]+)/);
-                    
+    extractBalancedJson(text, start) {
+        const opening = text[start];
+        const closing = opening === '{' ? '}' : ']';
+        let depth = 0;
+        let inString = false;
+        let escaped = false;
+
+        for (let i = start; i < text.length; i += 1) {
+            const char = text[i];
+
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (char === '\\') {
+                    escaped = true;
+                } else if (char === '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (char === '"') {
+                inString = true;
+                continue;
+            }
+
+            if (char === opening) {
+                depth += 1;
+            } else if (char === closing) {
+                depth -= 1;
+                if (depth === 0) {
                     return {
-                        fullReference: trimmed,
-                        type: typeMatch ? `cai.${typeMatch[1]}` : 'unknown',
-                        hash: hashMatch ? hashMatch[1] : null,
-                        verified: false // Will be updated if we can verify
+                        json: text.slice(start, i + 1),
+                        end: i + 1
                     };
-                });
-                
-                result.caiClaims.assertionsList = assertions;
+                }
             }
-        } catch (error) {
-            // Continue if assertions extraction fails
         }
+
+        return null;
     }
 
-    /**
-     * Detect hash algorithm from hash value
-     */
+    processCAIData(result) {
+        const providers = new Set(result.contentRecord.providers);
+        const assertionsByType = new Map();
+        const actionEntries = [];
+
+        result.jumbfBoxes.forEach((box) => {
+            const label = this.normalizeAssertionLabel(box.labels[0], box.assertionData);
+            const payload = box.assertionData;
+            if (!label) {
+                return;
+            }
+
+            assertionsByType.set(label, {
+                type: label,
+                source: 'JUMBF',
+                content: box.content,
+                jsonData: box.jsonData,
+                assertionData: payload
+            });
+
+            switch (label) {
+                case 'cai.claim':
+                    this.applyClaimPayload(payload, result);
+                    providers.add('CAI');
+                    break;
+                case 'cai.assertions':
+                    providers.add('CAI');
+                    break;
+                case 'cai.rights':
+                    if (payload && typeof payload === 'object') {
+                        result.detailedAssertions.rights = payload;
+                        result.structuredMetadata = { ...result.structuredMetadata, ...payload };
+                        if (!result.contentRecord.producer && payload.copyright) {
+                            result.contentRecord.producer = payload.copyright;
+                        }
+                    }
+                    providers.add('CAI');
+                    break;
+                case 'cai.identity':
+                    if (payload && typeof payload === 'object') {
+                        result.detailedAssertions.identity = payload;
+                        result.structuredMetadata = { ...result.structuredMetadata, ...payload };
+                        if (!result.contentRecord.producer) {
+                            result.contentRecord.producer = payload.display || payload.producer || payload.creator || null;
+                        }
+                    }
+                    providers.add('CAI');
+                    break;
+                case 'cai.actions':
+                    if (Array.isArray(payload)) {
+                        result.detailedAssertions.actions = payload;
+                        actionEntries.push(...payload);
+                    }
+                    providers.add('CAI');
+                    break;
+                case 'cai.acquisition_1':
+                    if (payload && typeof payload === 'object') {
+                        result.detailedAssertions.acquisition = payload;
+                        result.structuredMetadata = { ...result.structuredMetadata, ...payload };
+                    }
+                    providers.add('CAI');
+                    break;
+                case 'adobe.asset.info':
+                    if (payload && typeof payload === 'object') {
+                        result.caiClaims.assetInfo = payload;
+                        result.structuredMetadata = { ...result.structuredMetadata, ...payload };
+                    }
+                    providers.add('Adobe');
+                    break;
+                default:
+                    if (label.startsWith('cai.')) {
+                        providers.add('CAI');
+                    }
+                    if (label.startsWith('adobe.')) {
+                        providers.add('Adobe');
+                    }
+                    break;
+            }
+        });
+
+        result.assertions = Array.from(assertionsByType.values());
+        result.contentRecord.providers = Array.from(providers);
+
+        if (actionEntries.length > 0) {
+            result.contentRecord.editsAndActivity = actionEntries.map((entry) => this.formatActionEntry(entry));
+            const latestAction = actionEntries[actionEntries.length - 1];
+            if (!result.contentRecord.producedWith && latestAction['stEvt:softwareAgent']) {
+                result.contentRecord.producedWith = latestAction['stEvt:softwareAgent'];
+            }
+            if (latestAction['stEvt:when']) {
+                result.caiClaims.when = latestAction['stEvt:when'];
+            }
+            result.caiClaims.actions = actionEntries;
+        }
+
+        if (!result.contentRecord.producedWith && result.caiClaims.recorder) {
+            result.contentRecord.producedWith = result.caiClaims.recorder;
+        }
+
+        if (!result.contentRecord.producer) {
+            result.contentRecord.producer =
+                result.structuredMetadata.display ||
+                result.structuredMetadata.copyright ||
+                result.structuredMetadata.Copyright ||
+                null;
+        }
+
+        if (result.certificates.length > 0) {
+            const certificate = result.certificates[0];
+            result.contentRecord.identifiedBy = this.getCertificateEntity(certificate.info.subject);
+            result.contentRecord.signedBy = this.getCertificateEntity(certificate.info.issuer);
+        }
+
+        result.hasCAI =
+            result.assertions.length > 0 ||
+            Object.keys(result.caiClaims).length > 0 ||
+            (result.xmpData && /cai|jumbf/i.test(result.xmpData.raw));
+    }
+
+    normalizeAssertionLabel(label, payload) {
+        if (label !== 'cai.assertions' || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
+            return label;
+        }
+
+        if ('copyright' in payload || 'license' in payload || 'usage' in payload) {
+            return 'cai.rights';
+        }
+        if ('display' in payload || 'uri' in payload || 'creator' in payload) {
+            return 'cai.identity';
+        }
+
+        return label;
+    }
+
+    applyClaimPayload(payload, result) {
+        if (!payload || typeof payload !== 'object') {
+            return;
+        }
+
+        if (Array.isArray(payload.assertions)) {
+            result.caiClaims.assertionsList = payload.assertions.map((reference) => this.parseAssertionReference(reference));
+        }
+
+        if (Array.isArray(payload.asset_hashes)) {
+            result.caiClaims.assetHashes = payload.asset_hashes.map((hash) => ({
+                name: hash.name || null,
+                value: hash.value || null,
+                start: hash.start || null,
+                length: hash.length || null,
+                algorithm: this.detectHashAlgorithm(hash.value)
+            }));
+        }
+
+        if (payload.recorder) {
+            result.caiClaims.recorder = payload.recorder;
+            result.structuredMetadata.recorder = payload.recorder;
+        }
+
+        if (payload.signature) {
+            result.caiClaims.signatureReference = payload.signature;
+        }
+
+        result.caiClaims.claim = payload;
+    }
+
+    parseAssertionReference(reference) {
+        const clean = String(reference);
+        const typeMatch = clean.match(/\/(cai\.[^/?]+|adobe\.[^/?]+)(?:\?|$)/);
+        const hashMatch = clean.match(/[?&]hl=([^&]+)/);
+
+        return {
+            fullReference: clean,
+            type: typeMatch ? typeMatch[1] : 'unknown',
+            hash: hashMatch ? hashMatch[1] : null
+        };
+    }
+
+    formatActionEntry(entry) {
+        if (!entry || typeof entry !== 'object') {
+            return String(entry);
+        }
+
+        const action = entry['stEvt:action'] || entry.action || 'unknown';
+        const parameters = entry['stEvt:parameters'] || entry.parameters;
+        const software = entry['stEvt:softwareAgent'] || entry.softwareAgent;
+        const when = entry['stEvt:when'] || entry.when;
+
+        const parts = [action];
+        if (parameters) {
+            parts.push(parameters);
+        }
+        if (software) {
+            parts.push(`via ${software}`);
+        }
+        if (when) {
+            parts.push(`at ${when}`);
+        }
+
+        return parts.join(' | ');
+    }
+
     detectHashAlgorithm(hashValue) {
-        if (!hashValue) return 'unknown';
-        
-        // Based on length and prefix patterns
-        if (hashValue.startsWith('mEi') && hashValue.length > 40) {
-            return 'SHA-256 (Multihash)';
-        } else if (hashValue.length === 64) {
+        if (!hashValue) {
+            return 'unknown';
+        }
+        if (/^[A-Fa-f0-9]{64}$/.test(hashValue)) {
             return 'SHA-256';
-        } else if (hashValue.length === 40) {
+        }
+        if (/^[A-Fa-f0-9]{40}$/.test(hashValue)) {
             return 'SHA-1';
         }
-        
+        if (/^m[Ee][A-Za-z0-9+/=]+$/.test(hashValue)) {
+            return 'multihash';
+        }
         return 'unknown';
     }
 
-    /**
-     * Parse certificate information from signature data
-     */
-    parseCertificateInfo(signatureData) {
-        const certInfo = {
+    getCertificateEntity(nameInfo) {
+        if (!nameInfo) {
+            return null;
+        }
+        if (nameInfo.CN) {
+            return nameInfo.CN;
+        }
+        if (nameInfo.O) {
+            return nameInfo.O;
+        }
+        const summary = this.formatDistinguishedName(nameInfo);
+        return summary || null;
+    }
+
+    extractCertificates(bytes) {
+        const certificates = [];
+        const seen = new Set();
+
+        for (let offset = 0; offset < bytes.length - 8; offset += 1) {
+            if (bytes[offset] !== 0x30) {
+                continue;
+            }
+
+            const certificate = this.tryParseCertificate(bytes, offset);
+            if (!certificate) {
+                continue;
+            }
+
+            const key = `${certificate.offset}:${certificate.length}`;
+            if (seen.has(key)) {
+                continue;
+            }
+            seen.add(key);
+            certificates.push(certificate);
+            offset += Math.max(0, certificate.length - 1);
+        }
+
+        return certificates;
+    }
+
+    tryParseCertificate(bytes, offset) {
+        const outer = this.readASN1(bytes, offset);
+        if (!outer || outer.tag !== 0x30) {
+            return null;
+        }
+
+        let children;
+        try {
+            children = this.readASN1Children(bytes, outer.contentStart, outer.end);
+        } catch {
+            return null;
+        }
+
+        if (children.length < 3) {
+            return null;
+        }
+        if (children[0].tag !== 0x30 || children[1].tag !== 0x30 || children[2].tag !== 0x03) {
+            return null;
+        }
+
+        const info = this.parseCertificateInfo(bytes, children[0]);
+        if (!info.subject && !info.issuer) {
+            return null;
+        }
+
+        const certBytes = bytes.slice(offset, outer.end);
+        const base64 = this.arrayBufferToBase64(certBytes);
+
+        return {
+            offset,
+            length: outer.end - offset,
+            base64,
+            pem: this.formatAsPEM(base64),
+            info
+        };
+    }
+
+    parseCertificateInfo(bytes, tbsNode) {
+        const info = {
             issuer: null,
             subject: null,
             validFrom: null,
@@ -564,597 +826,316 @@ class JUMBFParser {
             algorithm: null
         };
 
-        try {
-            // Look for certificate patterns in the binary data
-            const textDecoder = new TextDecoder('utf-8', {fatal: false});
-            const sigString = textDecoder.decode(signatureData);
-            
-            // Extract common certificate fields
-            const orgMatch = sigString.match(/Adobe, Inc\./);
-            if (orgMatch) {
-                certInfo.issuer = 'Adobe, Inc.';
-            }
+        const fields = this.readASN1Children(bytes, tbsNode.contentStart, tbsNode.end);
+        let index = 0;
 
-            const domainMatch = sigString.match(/contentauthenticity\.org/);
-            if (domainMatch) {
-                certInfo.subject = 'contentauthenticity.org';
-            }
-
-            const caMatch = sigString.match(/CAI \(Temporary\)/);
-            if (caMatch) {
-                certInfo.department = 'CAI (Temporary)';
-            }
-
-            // Try to extract dates (format: YYMMDDHHMMSSZ)
-            const dateMatches = sigString.match(/\d{12}Z/g);
-            if (dateMatches && dateMatches.length >= 2) {
-                try {
-                    // Parse certificate validity dates
-                    certInfo.validFrom = this.parseASN1Date(dateMatches[0]);
-                    certInfo.validTo = this.parseASN1Date(dateMatches[1]);
-                } catch (e) {
-                    // Continue if date parsing fails
-                }
-            }
-
-        } catch (error) {
-            // Continue even if certificate parsing fails
+        if (fields[index] && fields[index].tagClass === 2 && fields[index].tagNumber === 0) {
+            index += 1;
         }
 
-        return certInfo;
-    }
+        if (fields[index]) {
+            info.serialNumber = this.bytesToHex(bytes.slice(fields[index].contentStart, fields[index].end));
+            index += 1;
+        }
 
-    /**
-     * Extract X.509 certificates from binary data
-     */
-    extractX509Certificates(data) {
-        console.log('=== X.509 CERTIFICATE EXTRACTION STARTED ===');
-        const certificates = [];
-        let offset = 0;
-        let found = 0;
-        
-        console.log('Searching for X.509 certificates in', data.length, 'bytes');
-        
-        // Also check the known certificate location from hex dump (0x13c60)
-        const knownOffset = 0x13c60;
-        if (knownOffset < data.length - 4) {
-            console.log(`Checking known certificate location at 0x${knownOffset.toString(16)}`);
-            console.log(`Bytes at known location: ${data[knownOffset].toString(16)} ${data[knownOffset+1].toString(16)} ${data[knownOffset+2].toString(16)} ${data[knownOffset+3].toString(16)}`);
+        if (fields[index] && fields[index].tag === 0x30) {
+            info.algorithm = this.parseAlgorithmIdentifier(bytes, fields[index]);
+            index += 1;
         }
-        
-        while (offset < data.length - 4) {
-            // Look for ASN.1 SEQUENCE starting with 30 82 (certificate signature)
-            // Also look for 30 83 (another common certificate pattern)
-            if ((data[offset] === 0x30 && data[offset + 1] === 0x82) ||
-                (data[offset] === 0x30 && data[offset + 1] === 0x83)) {
-                found++;
-                try {
-                    // Read the length (next 2 bytes in big-endian)
-                    const length = (data[offset + 2] << 8) | data[offset + 3];
-                    
-                    console.log(`Found 30 82 pattern at offset ${offset.toString(16)}, length: ${length}`);
-                    
-                    // Total certificate size including header
-                    const totalLength = length + 4;
-                    
-                    if (offset + totalLength <= data.length && length > 100 && length < 10000) {
-                        // Extract the certificate bytes
-                        const certBytes = data.slice(offset, offset + totalLength);
-                        
-                        // Try to extract some readable info for verification
-                        const certString = new TextDecoder('utf-8', {fatal: false}).decode(certBytes);
-                        const hasAdobe = certString.includes('Adobe');
-                        const hasContentAuth = certString.includes('contentauthenticity');
-                        
-                        console.log(`Certificate candidate: Adobe=${hasAdobe}, ContentAuth=${hasContentAuth}`);
-                        console.log('First 100 chars of decoded string:', certString.substring(0, 100));
-                        
-                        // Accept any certificate that looks like X.509, not just Adobe ones
-                        if (hasAdobe || hasContentAuth || this.looksLikeX509(certBytes)) {
-                            // Convert to base64
-                            const base64 = this.arrayBufferToBase64(certBytes);
-                            
-                            certificates.push({
-                                offset: offset,
-                                length: totalLength,
-                                base64: base64,
-                                pem: this.formatAsPEM(base64),
-                                info: this.extractCertInfo(certString)
-                            });
-                            
-                            console.log(`Added certificate at offset ${offset.toString(16)}`);
-                        }
-                        
-                        offset += totalLength;
-                    } else {
-                        console.log(`Invalid length or bounds check failed for pattern at ${offset.toString(16)}`);
-                        offset++;
-                    }
-                } catch (e) {
-                    console.log(`Error processing pattern at ${offset.toString(16)}:`, e);
-                    offset++;
-                }
-            } else {
-                offset++;
-            }
+
+        if (fields[index] && fields[index].tag === 0x30) {
+            info.issuer = this.parseDistinguishedName(bytes, fields[index]);
+            index += 1;
         }
-        
-        console.log(`Certificate search complete. Found ${found} 30 82 patterns, extracted ${certificates.length} certificates`);
-        return certificates;
-    }
-    
-    /**
-     * Check if bytes look like a valid X.509 certificate
-     */
-    looksLikeX509(certBytes) {
-        // Check for typical X.509 certificate patterns
-        const str = new TextDecoder('utf-8', {fatal: false}).decode(certBytes);
-        return str.includes('Certificate') || 
-               str.includes('RSA') ||
-               str.includes('SHA') ||
-               str.match(/\d{12}Z/) ||  // ASN.1 date format
-               str.includes('US') ||    // Common in cert location
-               str.includes('Inc');     // Common in organization names
-    }
-    
-    /**
-     * Convert ArrayBuffer to base64
-     */
-    arrayBufferToBase64(buffer) {
-        const bytes = new Uint8Array(buffer);
-        let binary = '';
-        for (let i = 0; i < bytes.length; i++) {
-            binary += String.fromCharCode(bytes[i]);
+
+        if (fields[index] && fields[index].tag === 0x30) {
+            const validity = this.parseValidity(bytes, fields[index]);
+            info.validFrom = validity.validFrom;
+            info.validTo = validity.validTo;
+            index += 1;
         }
-        return btoa(binary);
-    }
-    
-    /**
-     * Format base64 as PEM certificate
-     */
-    formatAsPEM(base64) {
-        const lines = [];
-        lines.push('-----BEGIN CERTIFICATE-----');
-        
-        // Split base64 into 64-character lines
-        for (let i = 0; i < base64.length; i += 64) {
-            lines.push(base64.substring(i, i + 64));
+
+        if (fields[index] && fields[index].tag === 0x30) {
+            info.subject = this.parseDistinguishedName(bytes, fields[index]);
         }
-        
-        lines.push('-----END CERTIFICATE-----');
-        return lines.join('\n');
-    }
-    
-    /**
-     * Extract basic certificate info from decoded string
-     */
-    extractCertInfo(certString) {
-        const info = {};
-        
-        if (certString.includes('Adobe')) {
-            info.issuer = 'Adobe, Inc.';
-        }
-        if (certString.includes('contentauthenticity.org')) {
-            info.subject = 'contentauthenticity.org';
-        }
-        if (certString.includes('CAI (Temporary)')) {
-            info.department = 'CAI (Temporary)';
-        }
-        if (certString.includes('San Jose')) {
-            info.location = 'San Jose, CA, US';
-        }
-        
-        // Extract dates (format: YYMMDDHHMMSSZ)
-        const dateMatches = certString.match(/(\d{12}Z)/g);
-        if (dateMatches && dateMatches.length >= 2) {
-            info.validFrom = this.parseASN1Date(dateMatches[0]);
-            info.validTo = this.parseASN1Date(dateMatches[1]);
-        }
-        
+
         return info;
     }
 
-    /**
-     * Parse ASN.1 date format (YYMMDDHHMMSSZ)
-     */
-    parseASN1Date(dateString) {
-        if (!dateString || dateString.length !== 13) return null;
-        
-        const year = parseInt(dateString.substr(0, 2));
-        const month = parseInt(dateString.substr(2, 2)) - 1; // JS months are 0-based
-        const day = parseInt(dateString.substr(4, 2));
-        const hour = parseInt(dateString.substr(6, 2));
-        const minute = parseInt(dateString.substr(8, 2));
-        const second = parseInt(dateString.substr(10, 2));
-        
-        // Assume 21xx for years 00-50, 20xx for 51-99
-        const fullYear = year <= 50 ? 2000 + year : 1900 + year;
-        
-        return new Date(fullYear, month, day, hour, minute, second);
-    }
-
-    /**
-     * Parse JUMBF boxes
-     */
-    parseJUMBFBoxes(data) {
-        const boxes = [];
-        let offset = 0;
-
-        try {
-            while (offset < data.length - 8) {
-                // Look for JUMBF box signatures
-                const box = this.parseJUMBFBox(data, offset);
-                if (box) {
-                    boxes.push(box);
-                    offset += box.size || 100; // Move forward
-                } else {
-                    offset += 1; // Move one byte forward if no box found
-                }
-
-                // Prevent infinite loops
-                if (boxes.length > 50 || offset > data.length) {
-                    break;
-                }
-            }
-        } catch (error) {
-            // Continue parsing even if individual boxes fail
-        }
-
-        return boxes;
-    }
-
-    /**
-     * Parse individual JUMBF box
-     */
-    parseJUMBFBox(data, offset) {
-        try {
-            if (offset + 8 > data.length) return null;
-
-            const box = {
-                offset: offset,
-                labels: [],
-                content: null,
-                type: 'unknown',
-                jsonData: null,
-                assertionData: null
-            };
-
-            // Read potential box header
-            const possibleSize = this.readUInt32BE(data, offset);
-            
-            // Look for CAI-related strings in a larger search area to capture more data
-            const searchSize = Math.min(offset + 2000, data.length);
-            const searchArea = data.slice(offset, searchSize);
-            const searchString = this.textDecoder.decode(searchArea);
-
-            // Extract CAI labels
-            const caiMatches = searchString.match(/cai\.[a-zA-Z_][a-zA-Z0-9._]*/g);
-            if (caiMatches) {
-                box.labels = [...new Set(caiMatches)];
-                box.type = 'CAI';
-                
-                // Try to extract JSON data for specific assertion types
-                box.assertionData = this.extractAssertionData(searchString, searchArea, caiMatches);
-            }
-
-            // Look for Adobe CAI references
-            if (searchString.includes('cb.adobe')) {
-                box.type = 'Adobe CAI';
-            }
-
-            // Extract readable content
-            const readableContent = searchString.replace(/[^\x20-\x7E]/g, ' ').trim();
-            if (readableContent.length > 10) {
-                box.content = readableContent.substring(0, 500); // Increased size to capture more
-            }
-
-            // Try to extract JSON structures
-            box.jsonData = this.extractJSONFromBox(searchString);
-
-            box.size = Math.min(possibleSize > 0 && possibleSize < 10000 ? possibleSize : 500, 2000);
-            
-            return box.labels.length > 0 || box.content || box.jsonData ? box : null;
-
-        } catch (error) {
+    parseAlgorithmIdentifier(bytes, node) {
+        const children = this.readASN1Children(bytes, node.contentStart, node.end);
+        if (!children[0] || children[0].tag !== 0x06) {
             return null;
         }
+        const oid = this.decodeOID(bytes.slice(children[0].contentStart, children[0].end));
+        return this.algorithmOidMap[oid] || oid;
     }
 
-    /**
-     * Extract assertion-specific data from JUMBF box
-     */
-    extractAssertionData(searchString, searchArea, labels) {
-        const assertionData = {};
+    parseValidity(bytes, node) {
+        const children = this.readASN1Children(bytes, node.contentStart, node.end);
+        return {
+            validFrom: children[0] ? this.parseASN1Time(bytes, children[0]) : null,
+            validTo: children[1] ? this.parseASN1Time(bytes, children[1]) : null
+        };
+    }
 
-        labels.forEach(label => {
-            try {
-                switch (label) {
-                    case 'cai.rights':
-                        assertionData.rights = this.extractRightsAssertion(searchString, searchArea);
-                        break;
-                    case 'cai.identity':
-                        assertionData.identity = this.extractIdentityAssertion(searchString, searchArea);
-                        break;
-                    case 'cai.actions':
-                        assertionData.actions = this.extractActionsAssertion(searchString, searchArea);
-                        break;
-                    case 'cai.acquisition':
-                        assertionData.acquisition = this.extractAcquisitionAssertion(searchString, searchArea);
-                        break;
+    parseDistinguishedName(bytes, node) {
+        const info = {};
+        const sets = this.readASN1Children(bytes, node.contentStart, node.end);
+
+        sets.forEach((setNode) => {
+            if (setNode.tag !== 0x31) {
+                return;
+            }
+            const sequences = this.readASN1Children(bytes, setNode.contentStart, setNode.end);
+            sequences.forEach((sequenceNode) => {
+                if (sequenceNode.tag !== 0x30) {
+                    return;
                 }
-            } catch (error) {
-                // Continue processing other assertions if one fails
-            }
-        });
-
-        return Object.keys(assertionData).length > 0 ? assertionData : null;
-    }
-
-    /**
-     * Extract JSON structures from box data
-     */
-    extractJSONFromBox(searchString) {
-        try {
-            // Look for JSON-like structures
-            const jsonMatches = searchString.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g);
-            if (jsonMatches) {
-                const validJson = [];
-                jsonMatches.forEach(match => {
-                    try {
-                        const parsed = JSON.parse(match);
-                        validJson.push(parsed);
-                    } catch (e) {
-                        // Not valid JSON, continue
-                    }
-                });
-                return validJson.length > 0 ? validJson : null;
-            }
-        } catch (error) {
-            // JSON extraction failed
-        }
-        return null;
-    }
-
-    /**
-     * Extract cai.rights assertion data
-     */
-    extractRightsAssertion(searchString, searchArea) {
-        const rights = {};
-        
-        // Look for rights-related patterns
-        const copyrightMatch = searchString.match(/copyright[\":\s]*([^\"}\n,]+)/i);
-        if (copyrightMatch) rights.copyright = copyrightMatch[1].trim();
-
-        const licenseMatch = searchString.match(/license[\":\s]*([^\"}\n,]+)/i);
-        if (licenseMatch) rights.license = licenseMatch[1].trim();
-
-        const usageMatch = searchString.match(/usage[\":\s]*([^\"}\n,]+)/i);
-        if (usageMatch) rights.usage = usageMatch[1].trim();
-
-        const creativeCommonsMatch = searchString.match(/creative.?commons[\":\s]*([^\"}\n,]+)/i);
-        if (creativeCommonsMatch) rights.creativeCommons = creativeCommonsMatch[1].trim();
-
-        return Object.keys(rights).length > 0 ? rights : null;
-    }
-
-    /**
-     * Extract cai.identity assertion data
-     */
-    extractIdentityAssertion(searchString, searchArea) {
-        const identity = {};
-
-        const creatorMatch = searchString.match(/creator[\":\s]*([^\"}\n,]+)/i);
-        if (creatorMatch) identity.creator = creatorMatch[1].trim();
-
-        const producerMatch = searchString.match(/producer[\":\s]*([^\"}\n,]+)/i);
-        if (producerMatch) identity.producer = producerMatch[1].trim();
-
-        const organizationMatch = searchString.match(/organization[\":\s]*([^\"}\n,]+)/i);
-        if (organizationMatch) identity.organization = organizationMatch[1].trim();
-
-        const credentialMatch = searchString.match(/credential[\":\s]*([^\"}\n,]+)/i);
-        if (credentialMatch) identity.credential = credentialMatch[1].trim();
-
-        return Object.keys(identity).length > 0 ? identity : null;
-    }
-
-    /**
-     * Extract cai.actions assertion data
-     */
-    extractActionsAssertion(searchString, searchArea) {
-        const actions = {};
-
-        const actionTypeMatch = searchString.match(/action[\":\s]*([^\"}\n,]+)/i);
-        if (actionTypeMatch) actions.action = actionTypeMatch[1].trim();
-
-        const softwareMatch = searchString.match(/software[\":\s]*([^\"}\n,]+)/i);
-        if (softwareMatch) actions.software = softwareMatch[1].trim();
-
-        const timestampMatch = searchString.match(/timestamp[\":\s]*([^\"}\n,]+)/i);
-        if (timestampMatch) actions.timestamp = timestampMatch[1].trim();
-
-        const parametersMatch = searchString.match(/parameters[\":\s]*([^\"}\n,]+)/i);
-        if (parametersMatch) actions.parameters = parametersMatch[1].trim();
-
-        return Object.keys(actions).length > 0 ? actions : null;
-    }
-
-    /**
-     * Extract cai.acquisition assertion data  
-     */
-    extractAcquisitionAssertion(searchString, searchArea) {
-        const acquisition = {};
-
-        const deviceMatch = searchString.match(/device[\":\s]*([^\"}\n,]+)/i);
-        if (deviceMatch) acquisition.device = deviceMatch[1].trim();
-
-        const cameraMatch = searchString.match(/camera[\":\s]*([^\"}\n,]+)/i);
-        if (cameraMatch) acquisition.camera = cameraMatch[1].trim();
-
-        const lensMatch = searchString.match(/lens[\":\s]*([^\"}\n,]+)/i);
-        if (lensMatch) acquisition.lens = lensMatch[1].trim();
-
-        const settingsMatch = searchString.match(/settings[\":\s]*([^\"}\n,]+)/i);
-        if (settingsMatch) acquisition.settings = settingsMatch[1].trim();
-
-        const locationMatch = searchString.match(/location[\":\s]*([^\"}\n,]+)/i);
-        if (locationMatch) acquisition.location = locationMatch[1].trim();
-
-        return Object.keys(acquisition).length > 0 ? acquisition : null;
-    }
-
-    /**
-     * Read 32-bit big-endian integer
-     */
-    readUInt32BE(data, offset) {
-        if (offset + 4 > data.length) return 0;
-        return (data[offset] << 24) | 
-               (data[offset + 1] << 16) | 
-               (data[offset + 2] << 8) | 
-               data[offset + 3];
-    }
-
-    /**
-     * Extract fallback metadata from all available data
-     */
-    extractFallbackMetadata(result) {
-        // If we haven't found the basic info yet, search in all content
-        if (!result.contentRecord.producer || !result.contentRecord.producedWith) {
-            console.log('Attempting fallback metadata extraction...');
-            
-            // Search in XMP raw data
-            if (result.xmpData && result.xmpData.raw) {
-                this.searchForKnownValues(result.xmpData.raw, result);
-            }
-            
-            // Search in JUMBF box content
-            result.jumbfBoxes.forEach(box => {
-                if (box.content) {
-                    this.searchForKnownValues(box.content, result);
+                const parts = this.readASN1Children(bytes, sequenceNode.contentStart, sequenceNode.end);
+                if (parts.length < 2 || parts[0].tag !== 0x06) {
+                    return;
+                }
+                const oid = this.decodeOID(bytes.slice(parts[0].contentStart, parts[0].end));
+                const key = this.attributeOidMap[oid] || oid;
+                const value = this.decodeASN1String(bytes, parts[1]);
+                if (value) {
+                    info[key] = value;
                 }
             });
+        });
 
-            // Hard-code known values from exiftool output for testing
-            if (!result.contentRecord.producer && !result.structuredMetadata.Copyright) {
-                console.log('Using known values from exiftool...');
-                result.contentRecord.producer = 'Starling Labs';
-                result.contentRecord.producedWith = 'Photoshop';
-                result.contentRecord.editsAndActivity = ['Edit', 'Crop'];
-                result.contentRecord.identifiedBy = 'Adobe';
-                result.contentRecord.signedBy = 'Adobe';
-                result.contentRecord.providers = ['Adobe', 'CAI'];
-                result.structuredMetadata = {
-                    'Copyright': 'Starling Labs',
-                    'StEvt_softwareAgent': 'Photoshop',
-                    'StEvt_action': 'cai.edit',
-                    'StEvt_parameters': 'Crop',
-                    'Recorder': 'Photoshop'
-                };
-            }
-        }
+        return Object.keys(info).length > 0 ? info : null;
     }
 
-    /**
-     * Search for known metadata values in text content
-     */
-    searchForKnownValues(textContent, result) {
-        const knownValues = {
-            'Starling Labs': () => { result.contentRecord.producer = 'Starling Labs'; },
-            'Photoshop': () => { 
-                if (!result.contentRecord.producedWith) {
-                    result.contentRecord.producedWith = 'Photoshop'; 
-                }
-            },
-            'cai.edit': () => { 
-                if (!result.contentRecord.editsAndActivity.includes('Edit')) {
-                    result.contentRecord.editsAndActivity.push('Edit'); 
-                }
-            },
-            'Crop': () => { 
-                if (!result.contentRecord.editsAndActivity.includes('Crop')) {
-                    result.contentRecord.editsAndActivity.push('Crop'); 
-                }
-            }
-        };
-
-        for (const [value, setFunction] of Object.entries(knownValues)) {
-            if (textContent.includes(value)) {
-                console.log(`Found known value: ${value}`);
-                setFunction();
-            }
+    formatDistinguishedName(nameInfo) {
+        if (!nameInfo) {
+            return '';
         }
-    }
 
-    /**
-     * Process and organize CAI data
-     */
-    processCAIData(result) {
-        // Initialize detailed assertion data
-        result.detailedAssertions = {
-            rights: null,
-            identity: null,
-            actions: null,
-            acquisition: null
-        };
+        const order = ['CN', 'OU', 'O', 'L', 'ST', 'C'];
+        const rendered = [];
 
-        // Final fallback: search for known values in all parsed content
-        this.extractFallbackMetadata(result);
-
-        // Organize assertions from JUMBF boxes
-        result.jumbfBoxes.forEach(box => {
-            if (box.labels) {
-                result.assertions.push(...box.labels.map(label => ({
-                    type: label,
-                    source: 'JUMBF',
-                    content: box.content,
-                    jsonData: box.jsonData,
-                    assertionData: box.assertionData
-                })));
-
-                // Collect detailed assertion data
-                if (box.assertionData) {
-                    if (box.assertionData.rights) {
-                        result.detailedAssertions.rights = {
-                            ...result.detailedAssertions.rights,
-                            ...box.assertionData.rights
-                        };
-                    }
-                    if (box.assertionData.identity) {
-                        result.detailedAssertions.identity = {
-                            ...result.detailedAssertions.identity,
-                            ...box.assertionData.identity
-                        };
-                    }
-                    if (box.assertionData.actions) {
-                        result.detailedAssertions.actions = {
-                            ...result.detailedAssertions.actions,
-                            ...box.assertionData.actions
-                        };
-                    }
-                    if (box.assertionData.acquisition) {
-                        result.detailedAssertions.acquisition = {
-                            ...result.detailedAssertions.acquisition,
-                            ...box.assertionData.acquisition
-                        };
-                    }
-                }
+        order.forEach((key) => {
+            if (nameInfo[key]) {
+                rendered.push(`${key}=${nameInfo[key]}`);
             }
         });
 
-        // Remove duplicates
-        result.assertions = result.assertions.filter((assertion, index, self) => 
-            index === self.findIndex(a => a.type === assertion.type)
-        );
+        Object.keys(nameInfo).forEach((key) => {
+            if (!order.includes(key)) {
+                rendered.push(`${key}=${nameInfo[key]}`);
+            }
+        });
 
-        // Determine if image has CAI data
-        result.hasCAI = result.assertions.length > 0 || 
-                        Object.keys(result.caiClaims).length > 0 ||
-                        (result.xmpData && result.xmpData.raw.includes('cai'));
+        return rendered.join(', ');
     }
 
-    /**
-     * Get human-readable summary
-     */
+    readASN1(bytes, offset) {
+        if (offset >= bytes.length) {
+            return null;
+        }
+
+        const tag = bytes[offset];
+        if (offset + 1 >= bytes.length) {
+            return null;
+        }
+
+        const lengthInfo = this.readASN1Length(bytes, offset + 1);
+        if (!lengthInfo) {
+            return null;
+        }
+
+        const headerLength = 1 + lengthInfo.bytesRead;
+        const contentStart = offset + headerLength;
+        const end = contentStart + lengthInfo.length;
+
+        if (end > bytes.length) {
+            return null;
+        }
+
+        return {
+            tag,
+            tagClass: (tag & 0xC0) >> 6,
+            constructed: (tag & 0x20) !== 0,
+            tagNumber: tag & 0x1F,
+            offset,
+            headerLength,
+            contentStart,
+            end,
+            length: lengthInfo.length
+        };
+    }
+
+    readASN1Length(bytes, offset) {
+        if (offset >= bytes.length) {
+            return null;
+        }
+
+        const first = bytes[offset];
+        if ((first & 0x80) === 0) {
+            return {
+                length: first,
+                bytesRead: 1
+            };
+        }
+
+        const count = first & 0x7F;
+        if (count === 0 || count > 4 || offset + count >= bytes.length) {
+            return null;
+        }
+
+        let length = 0;
+        for (let i = 0; i < count; i += 1) {
+            length = (length << 8) | bytes[offset + 1 + i];
+        }
+
+        return {
+            length,
+            bytesRead: 1 + count
+        };
+    }
+
+    readASN1Children(bytes, start, end) {
+        const children = [];
+        let offset = start;
+
+        while (offset < end) {
+            const child = this.readASN1(bytes, offset);
+            if (!child || child.end > end || child.end <= offset) {
+                throw new Error('Invalid ASN.1 child node.');
+            }
+            children.push(child);
+            offset = child.end;
+        }
+
+        return children;
+    }
+
+    decodeOID(bytes) {
+        if (!bytes || bytes.length === 0) {
+            return '';
+        }
+
+        const first = bytes[0];
+        const parts = [Math.floor(first / 40), first % 40];
+        let value = 0;
+
+        for (let i = 1; i < bytes.length; i += 1) {
+            value = (value << 7) | (bytes[i] & 0x7F);
+            if ((bytes[i] & 0x80) === 0) {
+                parts.push(value);
+                value = 0;
+            }
+        }
+
+        return parts.join('.');
+    }
+
+    decodeASN1String(bytes, node) {
+        const raw = bytes.slice(node.contentStart, node.end);
+        switch (node.tag) {
+            case 0x0C:
+            case 0x13:
+            case 0x14:
+            case 0x16:
+            case 0x1A:
+            case 0x1E:
+                return this.textDecoder.decode(raw).replace(/\0+$/g, '').trim();
+            default:
+                return this.textDecoder.decode(raw).replace(/\0+$/g, '').trim();
+        }
+    }
+
+    parseASN1Time(bytes, node) {
+        const text = this.textDecoder.decode(bytes.slice(node.contentStart, node.end)).trim();
+        if (node.tag === 0x17) {
+            return this.parseUTCTime(text);
+        }
+        if (node.tag === 0x18) {
+            return this.parseGeneralizedTime(text);
+        }
+        return text || null;
+    }
+
+    parseUTCTime(text) {
+        const match = text.match(/^(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})Z$/);
+        if (!match) {
+            return text;
+        }
+
+        const year = Number(match[1]);
+        const fullYear = year >= 50 ? 1900 + year : 2000 + year;
+        return `${fullYear}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}Z`;
+    }
+
+    parseGeneralizedTime(text) {
+        const match = text.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})Z$/);
+        if (!match) {
+            return text;
+        }
+        return `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}Z`;
+    }
+
+    arrayBufferToBase64(buffer) {
+        let binary = '';
+        buffer.forEach((byte) => {
+            binary += String.fromCharCode(byte);
+        });
+        return btoa(binary);
+    }
+
+    formatAsPEM(base64) {
+        const lines = ['-----BEGIN CERTIFICATE-----'];
+        for (let i = 0; i < base64.length; i += 64) {
+            lines.push(base64.slice(i, i + 64));
+        }
+        lines.push('-----END CERTIFICATE-----');
+        return lines.join('\n');
+    }
+
+    readUInt16(data, offset, byteOrder) {
+        if (byteOrder === 'LE') {
+            return data[offset] | (data[offset + 1] << 8);
+        }
+        return (data[offset] << 8) | data[offset + 1];
+    }
+
+    readUInt32(data, offset, byteOrder) {
+        if (byteOrder === 'LE') {
+            return (
+                data[offset] |
+                (data[offset + 1] << 8) |
+                (data[offset + 2] << 16) |
+                (data[offset + 3] << 24)
+            ) >>> 0;
+        }
+        return (
+            (data[offset] << 24) |
+            (data[offset + 1] << 16) |
+            (data[offset + 2] << 8) |
+            data[offset + 3]
+        ) >>> 0;
+    }
+
+    readUIntArray(data, offset, count, size, byteOrder) {
+        const values = [];
+        for (let i = 0; i < count; i += 1) {
+            values.push(size === 2
+                ? this.readUInt16(data, offset + (i * size), byteOrder)
+                : this.readUInt32(data, offset + (i * size), byteOrder));
+        }
+        return values;
+    }
+
+    bytesToHex(bytes) {
+        return Array.from(bytes).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    }
+
+    sanitizeText(text) {
+        return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]+/g, ' ');
+    }
+
     getSummary(result) {
         const summary = {
             hasCAI: result.hasCAI,
@@ -1165,20 +1146,27 @@ class JUMBFParser {
             errors: result.errors.length
         };
 
-        if (result.xmpData) summary.dataTypes.push('XMP');
-        if (result.exifData) summary.dataTypes.push('EXIF');
-        if (result.jumbfBoxes.length > 0) summary.dataTypes.push('JUMBF');
+        if (result.xmpData) {
+            summary.dataTypes.push('XMP');
+        }
+        if (result.exifData) {
+            summary.dataTypes.push('EXIF');
+        }
+        if (result.jumbfBoxes.length > 0) {
+            summary.dataTypes.push('JUMBF');
+        }
+        if (result.certificates.length > 0) {
+            summary.dataTypes.push('X.509');
+        }
 
         return summary;
     }
 }
 
-// Export for use in HTML
 if (typeof window !== 'undefined') {
     window.JUMBFParser = JUMBFParser;
 }
 
-// Export for Node.js
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = JUMBFParser;
 }

@@ -541,6 +541,48 @@
         .detail-text {
             font-size: 14px;
         }
+
+        .action-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            width: 100%;
+        }
+
+        .action-entry {
+            display: grid;
+            grid-template-columns: 12px 1fr;
+            column-gap: 12px;
+            align-items: start;
+        }
+
+        .action-marker {
+            width: 12px;
+            height: 12px;
+            margin-top: 4px;
+            border-radius: 999px;
+            background: linear-gradient(180deg, #111 0%, #6b6b6b 100%);
+            box-shadow: 0 0 0 3px #ececec;
+        }
+
+        .action-body {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+        }
+
+        .action-primary {
+            color: #1f1f1f;
+            font-weight: 600;
+            line-height: 1.35;
+        }
+
+        .action-secondary {
+            color: #6d6d6d;
+            font-size: 12px;
+            line-height: 1.35;
+        }
         
         .detail-thumbnail {
             width: 40px;
@@ -1204,8 +1246,18 @@
             // Edits and activity
             const editsActivity = document.getElementById('edits-activity');
             if (editsActivity) {
-                if (contentRecord.editsAndActivity && contentRecord.editsAndActivity.length > 0) {
-                    editsActivity.textContent = contentRecord.editsAndActivity.join(', ');
+                const actionEntries = metadata.detailedAssertions?.actions;
+                if (Array.isArray(actionEntries) && actionEntries.length > 0) {
+                    editsActivity.innerHTML = `<div class="action-list">${actionEntries.map(formatActionSummary).join('')}</div>`;
+                } else if (contentRecord.editsAndActivity && contentRecord.editsAndActivity.length > 0) {
+                    editsActivity.innerHTML = `<div class="action-list">${contentRecord.editsAndActivity.map(action => `
+                        <div class="action-entry">
+                            <div class="action-marker"></div>
+                            <div class="action-body">
+                                <div class="action-primary">${escapeHtml(String(action))}</div>
+                            </div>
+                        </div>
+                    `).join('')}</div>`;
                 } else {
                     editsActivity.textContent = 'No edits recorded';
                 }
@@ -1434,7 +1486,7 @@
                         html += '<div class="detailed-item"><span class="detailed-label">Certificate Info:</span><div class="detailed-value">';
                         Object.entries(cert.info).forEach(([key, value]) => {
                             if (value) {
-                                html += `<div><strong>${key}:</strong> ${value}</div>`;
+                                html += `<div><strong>${formatLabel(key)}:</strong> ${formatCertificateFieldValue(key, value)}</div>`;
                             }
                         });
                         html += '</div></div>';
@@ -1473,11 +1525,11 @@
                 html += `
                     <div class="detailed-item">
                         <span class="detailed-label">X.509 Certificates:</span>
-                        <span class="detailed-value">No X.509 certificates found in binary data</span>
+                        <span class="detailed-value">No validated X.509 certificate structures were parsed from this file</span>
                     </div>
                     <div class="detailed-item">
                         <span class="detailed-label">Note:</span>
-                        <span class="detailed-value">Searched for ASN.1 SEQUENCE patterns (30 82) containing Adobe/CAI references</span>
+                        <span class="detailed-value">Certificate details are only shown when a full ASN.1/X.509 structure can be parsed from the JPEG bytes</span>
                     </div>
                 `;
                 html += '</div>';
@@ -1508,9 +1560,17 @@
             return Object.entries(obj).map(([key, value]) => {
                 let displayValue;
                 if (Array.isArray(value)) {
-                    displayValue = value.length > 0 ? value.join(', ') : 'Empty array';
+                    if (value.length === 0) {
+                        displayValue = 'Empty array';
+                    } else if (value.every(item => typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean')) {
+                        displayValue = value.join(', ');
+                    } else {
+                        displayValue = `<div class="json-display">${JSON.stringify(value, null, 2)}</div>`;
+                    }
                 } else if (typeof value === 'object' && value !== null) {
-                    displayValue = `<div class="json-display">${JSON.stringify(value, null, 2)}</div>`;
+                    displayValue = isDistinguishedName(value)
+                        ? formatDistinguishedName(value)
+                        : `<div class="json-display">${JSON.stringify(value, null, 2)}</div>`;
                 } else {
                     displayValue = String(value);
                 }
@@ -1553,10 +1613,13 @@
 
         function formatValue(value) {
             if (Array.isArray(value)) {
-                return value.join(', ');
-            }
-            if (typeof value === 'object') {
+                if (value.every(item => typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean')) {
+                    return value.join(', ');
+                }
                 return JSON.stringify(value);
+            }
+            if (typeof value === 'object' && value !== null) {
+                return isDistinguishedName(value) ? formatDistinguishedName(value) : JSON.stringify(value);
             }
             return String(value);
         }
@@ -1570,51 +1633,159 @@
             }
         }
 
+        function formatDistinguishedName(nameInfo) {
+            if (!nameInfo || typeof nameInfo !== 'object') {
+                return 'Not specified';
+            }
+
+            const order = ['CN', 'OU', 'O', 'L', 'ST', 'C'];
+            const parts = [];
+
+            order.forEach(key => {
+                if (nameInfo[key]) {
+                    parts.push(`${key}=${nameInfo[key]}`);
+                }
+            });
+
+            Object.entries(nameInfo).forEach(([key, value]) => {
+                if (!order.includes(key)) {
+                    parts.push(`${key}=${value}`);
+                }
+            });
+
+            return parts.join(', ') || 'Not specified';
+        }
+
+        function isDistinguishedName(value) {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) {
+                return false;
+            }
+
+            const dnKeys = ['CN', 'OU', 'O', 'L', 'ST', 'C'];
+            return Object.keys(value).some(key => dnKeys.includes(key));
+        }
+
+        function formatCertificateFieldValue(key, value) {
+            if (isDistinguishedName(value)) {
+                return escapeHtml(formatDistinguishedName(value));
+            }
+            return escapeHtml(String(value));
+        }
+
+        function formatActionSummary(action) {
+            if (!action || typeof action !== 'object') {
+                return `
+                    <div class="action-entry">
+                        <div class="action-marker"></div>
+                        <div class="action-body">
+                            <div class="action-primary">${escapeHtml(String(action))}</div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            const actionName = humanizeActionName(action['stEvt:action'] || action.action || 'Unknown action');
+            const parameters = action['stEvt:parameters'] || action.parameters;
+            const software = action['stEvt:softwareAgent'] || action.softwareAgent;
+            const when = action['stEvt:when'] || action.when;
+            const primary = [actionName, parameters ? escapeHtml(parameters) : null]
+                .filter(Boolean)
+                .join(' / ');
+            const secondary = [software ? `in ${escapeHtml(software)}` : null, when ? escapeHtml(formatTimestamp(when)) : null]
+                .filter(Boolean)
+                .join(' • ');
+
+            return `
+                <div class="action-entry">
+                    <div class="action-marker"></div>
+                    <div class="action-body">
+                        <div class="action-primary">${primary}</div>
+                        ${secondary ? `<div class="action-secondary">${secondary}</div>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        function humanizeActionName(actionName) {
+            const normalized = String(actionName);
+            if (normalized === 'cai.edit') {
+                return 'Edit';
+            }
+            return escapeHtml(normalized.replace(/^cai\./, '').replace(/[_-]+/g, ' '));
+        }
+
+        function escapeHtml(value) {
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         // Populate signature tab with detailed certificate and signature info
         function populateSignatureTab(metadata) {
             const claims = metadata.caiClaims || {};
+            const primaryCert = metadata.certificates && metadata.certificates.length > 0
+                ? metadata.certificates[0]
+                : null;
             
-            // Certificate Authority info
+            // Certificate Authority info - extract from actual certificates
             const certAuthority = document.getElementById('cert-authority');
-            certAuthority.innerHTML = `
-                <div class="cert-field">
-                    <span class="cert-label">Issuer:</span>
-                    <span class="cert-value">Adobe, Inc.</span>
-                </div>
-                <div class="cert-field">
-                    <span class="cert-label">Department:</span>
-                    <span class="cert-value">CAI (Temporary)</span>
-                </div>
-                <div class="cert-field">
-                    <span class="cert-label">Subject:</span>
-                    <span class="cert-value">contentauthenticity.org</span>
-                </div>
-                <div class="cert-field">
-                    <span class="cert-label">Location:</span>
-                    <span class="cert-value">San Jose, CA, US</span>
-                </div>
-            `;
+            if (primaryCert) {
+                const subject = primaryCert.info?.subject ? formatDistinguishedName(primaryCert.info.subject) : 'Not parsed';
+                const issuer = primaryCert.info?.issuer ? formatDistinguishedName(primaryCert.info.issuer) : 'Not parsed';
+                certAuthority.innerHTML = `
+                    <div class="cert-field">
+                        <span class="cert-label">Subject:</span>
+                        <span class="cert-value">${subject}</span>
+                    </div>
+                    <div class="cert-field">
+                        <span class="cert-label">Issuer:</span>
+                        <span class="cert-value">${issuer}</span>
+                    </div>
+                    <div class="cert-field">
+                        <span class="cert-label">Location:</span>
+                        <span class="cert-value">Offset ${primaryCert.offset}, ${primaryCert.length} bytes</span>
+                    </div>
+                `;
+            } else {
+                certAuthority.innerHTML = `
+                    <div class="cert-field">
+                        <span class="cert-label">Certificate:</span>
+                        <span class="cert-value">No X.509 certificate found in this image</span>
+                    </div>
+                `;
+            }
             
-            // Certificate Validity
+            // Certificate validity parsed from ASN.1/X.509
             const certValidity = document.getElementById('cert-validity');
-            certValidity.innerHTML = `
-                <div class="cert-field">
-                    <span class="cert-label">Valid From:</span>
-                    <span class="cert-value">January 24, 2021</span>
-                </div>
-                <div class="cert-field">
-                    <span class="cert-label">Valid To:</span>
-                    <span class="cert-value">July 23, 2021</span>
-                </div>
-                <div class="cert-field">
-                    <span class="cert-label">Status:</span>
-                    <span class="cert-value" style="color: #ffc107;">⚠️ Expired</span>
-                </div>
-                <div class="cert-field">
-                    <span class="cert-label">Algorithm:</span>
-                    <span class="cert-value">RSA with SHA-256</span>
-                </div>
-            `;
+            if (primaryCert) {
+                const validFrom = primaryCert.info?.validFrom || 'Not parsed';
+                const validTo = primaryCert.info?.validTo || 'Not parsed';
+                const algorithm = primaryCert.info?.algorithm || 'Not parsed';
+                certValidity.innerHTML = `
+                    <div class="cert-field">
+                        <span class="cert-label">Valid From:</span>
+                        <span class="cert-value">${validFrom}</span>
+                    </div>
+                    <div class="cert-field">
+                        <span class="cert-label">Valid To:</span>
+                        <span class="cert-value">${validTo}</span>
+                    </div>
+                    <div class="cert-field">
+                        <span class="cert-label">Algorithm:</span>
+                        <span class="cert-value">${algorithm}</span>
+                    </div>
+                `;
+            } else {
+                certValidity.innerHTML = `
+                    <div class="cert-field">
+                        <span class="cert-label">Validity:</span>
+                        <span class="cert-value">No certificate found to check validity</span>
+                    </div>
+                `;
+            }
             
             // Asset Hashes
             const assetHashes = document.getElementById('asset-hashes');
@@ -1629,15 +1800,8 @@
                 `).join('');
             } else {
                 assetHashes.innerHTML = `
-                    <div class="hash-item">
-                        <span class="hash-name">before_cai</span>
-                        <div class="hash-value">mEiDkNBx7UW/JaKwEGWxtYe7GJ9xOIrXp72PgjrtGGjPhAA</div>
-                        <div class="hash-algorithm">SHA-256 (Multihash)</div>
-                    </div>
-                    <div class="hash-item">
-                        <span class="hash-name">after_cai</span>
-                        <div class="hash-value">mEiCVwmLRWwpPTTBbdo+oAmXv6vK6SOEa55rpyhs0e+T6EQ</div>
-                        <div class="hash-algorithm">SHA-256 (Multihash)</div>
+                    <div class="hash-item" style="color: #666; font-style: italic;">
+                        <span class="hash-name">No asset hash data found in this image</span>
                     </div>
                 `;
             }
@@ -1653,43 +1817,26 @@
                 `).join('');
             } else {
                 verifiedAssertions.innerHTML = `
-                    <div class="assertion-item">
-                        <div class="assertion-type">cai.rights</div>
-                        <div class="assertion-hash">Hash: mEiBChBVd8onGt71mftnzv4e9C6m67kAeHCK1K8TDtuKfDA</div>
-                    </div>
-                    <div class="assertion-item">
-                        <div class="assertion-type">cai.identity</div>
-                        <div class="assertion-hash">Hash: mEiCFP/TTqH5RXNG7hraGyHrTjtJboIyM3ATJICoOZQcBhg</div>
-                    </div>
-                    <div class="assertion-item">
-                        <div class="assertion-type">cai.actions</div>
-                        <div class="assertion-hash">Hash: mEiD9vr+I14MmFX5hD34CBD2csJYVAYbVpdLxcBKP/1ajiQ</div>
-                    </div>
-                    <div class="assertion-item">
-                        <div class="assertion-type">cai.acquisition</div>
-                        <div class="assertion-hash">Hash: mEiAshAex9D5ycZE93X+ZiS8af5UzI7fudf+oynmh2EMz5w</div>
+                    <div class="assertion-item" style="color: #666; font-style: italic;">
+                        <div class="assertion-type">No verified assertions found in this image</div>
                     </div>
                 `;
             }
             
-            // Signature Verification Status
+            // Signature Verification Status - based on certificate presence
             const signatureStatus = document.getElementById('signature-status');
-            const hasSignatureRef = claims.signatureReference || metadata.assertions?.some(a => a.type.includes('signature'));
             
-            if (hasSignatureRef) {
-                // Simulate signature verification result
-                setTimeout(() => {
-                    signatureStatus.className = 'signature-status warning';
-                    signatureStatus.innerHTML = `
-                        <span class="status-indicator">⚠️</span>
-                        <span class="status-text">Certificate expired but signature was valid when created (2021)</span>
-                    `;
-                }, 1000);
+            if (primaryCert) {
+                signatureStatus.className = 'signature-status info';
+                signatureStatus.innerHTML = `
+                    <span class="status-indicator">📋</span>
+                    <span class="status-text">Validated X.509 certificate structure found. Cryptographic signature verification is still not implemented.</span>
+                `;
             } else {
                 signatureStatus.className = 'signature-status invalid';
                 signatureStatus.innerHTML = `
                     <span class="status-indicator">❌</span>
-                    <span class="status-text">No digital signature found</span>
+                    <span class="status-text">No X.509 certificate found in this image</span>
                 `;
             }
         }
